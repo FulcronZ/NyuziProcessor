@@ -1,5 +1,5 @@
 // 
-// Copyright 2011-2015 Jeff Bush
+// Copyright 2015 Jeff Bush
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,19 +14,16 @@
 // limitations under the License.
 // 
 
+#include "unistd.h"
 
-#pragma once
+// Assuming 50 Mhz system clock
+#define CLOCKS_PER_US 50
 
-#define EPERM 1
-#define ENOENT 2
-#define EIO 5
-#define EBADF 9
-#define ENOMEM 12
-#define EINVAL 22
-#define EMFILE 24 // Too many open files
+int usleep(useconds_t delay)
+{
+	useconds_t expire = __builtin_nyuzi_read_control_reg(6) + delay * CLOCKS_PER_US;
+	while (__builtin_nyuzi_read_control_reg(6) < expire)
+		;
 
-#define __MAX_THREADS 64
-
-extern int __errno_array[__MAX_THREADS];	
-
-#define errno __errno_array[__builtin_nyuzi_read_control_reg(0)]
+	return 0;
+}

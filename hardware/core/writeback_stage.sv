@@ -270,7 +270,7 @@ module writeback_stage(
 
 	// Suspend thread if necessary
 	assign wb_suspend_thread_oh = (dd_suspend_thread || sq_rollback_en || ior_rollback_en) 
-		? thread_oh : 0;
+		? thread_oh : thread_bitmap_t'(0);
 
 	// If there are pending stores that have not yet been acknowledged and been updated
 	// to the L1 cache, apply them now.
@@ -352,16 +352,16 @@ module writeback_stage(
 				multi_issue_pending[i] <= 0;
 			end
 			
-			__debug_is_sync_store <= 1'h0;
-			__debug_wb_pc <= 1'h0;
-			wb_writeback_en <= 1'h0;
-			wb_writeback_is_last_subcycle <= 1'h0;
-			wb_writeback_is_vector <= 1'h0;
-			wb_writeback_mask <= 1'h0;
-			wb_writeback_reg <= 1'h0;
-			wb_writeback_thread_idx <= 1'h0;
-			wb_writeback_value <= 1'h0;
-			writeback_counter <= 5'h0;
+			__debug_is_sync_store <= '0;
+			__debug_wb_pc <= '0;
+			wb_writeback_en <= '0;
+			wb_writeback_is_last_subcycle <= '0;
+			wb_writeback_is_vector <= '0;
+			wb_writeback_mask <= '0;
+			wb_writeback_reg <= '0;
+			wb_writeback_thread_idx <= '0;
+			wb_writeback_value <= '0;
+			writeback_counter <= '0;
 		end
 		else
 		begin
