@@ -19,7 +19,7 @@
 
 //
 // Tracks pending L1 misses.  Detects and consolidates multiple faults for the same address.
-// Wakes threads when loads are satisfied.
+// Wakes threads when loads complete.
 //
 
 module l1_load_miss_queue(
@@ -74,7 +74,6 @@ module l1_load_miss_queue(
 		.one_hot(send_grant_oh));
 
 	// Request out
-	// XXX may want to register this to reduce latency.
 	assign dequeue_ready = |arbiter_request;
 	assign dequeue_addr = pending_entries[send_grant_idx].address;
 	assign dequeue_idx = send_grant_idx;
@@ -88,8 +87,7 @@ module l1_load_miss_queue(
 	generate
 		for (wait_entry = 0; wait_entry < `THREADS_PER_CORE; wait_entry++)
 		begin : wait_logic_gen
-			// Synchronized requests cannot be combined with
-			// other requests.
+			// Synchronized requests cannot be combined with other requests.
 			assign collided_miss_oh[wait_entry] = pending_entries[wait_entry].valid 
 				&& pending_entries[wait_entry].address == cache_miss_addr
 				&& !pending_entries[wait_entry].synchronized
@@ -154,11 +152,13 @@ module l1_load_miss_queue(
 		end
 	endgenerate
 	
-	always_ff @(posedge clk)
+`ifdef SIMULATION
+	always_ff @(posedge clk, posedge reset)
 	begin
 		 if (!reset)
 		 	assert($onehot0(collided_miss_oh));
 	end
+`endif
 endmodule
 
 // Local Variables:

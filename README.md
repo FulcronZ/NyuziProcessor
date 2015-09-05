@@ -4,107 +4,107 @@ Nyuzi is an experimental multicore GPGPU processor. It supports vector floating
 point, hardware multithreading, and cache coherence. The SystemVerilog-based 
 hardware implementation is synthesizable and runs on FPGA. This project also 
 includes an LLVM-based C++ toolchain, a symbolic debugger, an emulator, software 
-libraries, and hardware verification tests. It is useful as a platform for
-microarchitecture experimentation, performance modeling, and parallel software
-development.
+libraries, and hardware verification tests. It is useful for microarchitecture 
+experimentation, performance modeling, and parallel software development.
 
-License: Apache 2.0    
-Documentation: https://github.com/jbush001/NyuziProcessor/wiki  
-Mailing list: https://groups.google.com/forum/#!forum/nyuzi-processor-dev  
-Blog: http://latchup.blogspot.com/
+I've attempted to make this easy to set up and highly hackable. It uses free and
+mostly open source tools. Contributions are welcome, please see 
+[CONTRIBUTING](CONTRIBUTING.md) for more details.
+
+**Documentation:** https://github.com/jbush001/NyuziProcessor/wiki  
+**Mailing list:** https://groups.google.com/forum/#!forum/nyuzi-processor-dev   
+**License:** Apache 2.0    
+**Blog:** http://latchup.blogspot.com/   
+[![Chat at https://gitter.im/jbush001/NyuziProcessor](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/jbush001/NyuziProcessor?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
 # Getting Started
 
-This section explains how to get the design running in the cycle-accurate 
-Verilog simulator and the emulator. This environment allows development of 
-hardware and software without an FPGA.
+The following instructions explain how to get the Nyuzi development environment
+set up. This allows cycle-accurate simulation of the hardware and software 
+development using the emulator. It does not require an FPGA.
 
-## Required Software
+If you have issues, feel free to send a message to the mailing list or Gitter 
+(links above).
 
-The following sections explain how to install these packages for each operating
-system.
+These instructions assume you have cloned this repo locally and have a shell open 
+in the top directory.
 
-- GCC 4.8+ or Apple Clang 4.2+
-- Python 2.7
-- [Verilator 3.864+](http://www.veripool.org/projects/verilator/wiki/Installing).  
-- Perl 5.x+ (required by Verilator)
-- Nyuzi cross compiler toolchain: https://github.com/jbush001/NyuziToolchain 
-- libsdl 2.0
-- ImageMagick
+## Install Prerequisites
 
-## Optional Software:
 
-- Emacs v23.2+, for 
-   [AUTOWIRE/AUTOINST](http://www.veripool.org/projects/verilog-mode/wiki/Verilog-mode_veritedium).
-- Java (J2SE 6+) for visualizer app 
-- [GTKWave](http://gtkwave.sourceforge.net/) for analyzing waveform files 
+### Linux (Ubuntu)
 
-## Building on Linux
+This requires Ubuntu 14 or later to get the proper package versions. It should
+work for other distributions, but you will probably need to modify some 
+package names.
 
-Build the Nyuzi toolchain following instructions in https://github.com/jbush001/NyuziToolchain 
+	sudo apt-get -y install cmake make gcc g++ bison flex python perl emacs curl openjdk-7-jdk swig zlib1g-dev python-dev libxml2-dev libedit-dev ncurses-dev libsdl2-dev gtkwave imagemagick 
 
-Next, you will need Verilator. Many package managers have Verilator, but it may
-be out of date. It can be installed as follows on Ubuntu:
+*Emacs is used for [verilog-mode](http://www.veripool.org/wiki/verilog-mode) AUTO macros. 
+The makefile executes this operation in batch mode*
 
-    sudo apt-get install verilator
-    verilator --version
+### MacOS
 
-Bug fixes in at least version 3.864 are necessary for it to run properly. Some
-of the bugs are subtle, so it may appear to work at first but then fail in odd
-ways if you are out of date. If you don't have a recent version, build from
-source using these instructions:
+These instructions assume Mavericks or later.  If you don't have XCode
+already, install the command line tools like this:
 
-http://www.veripool.org/projects/verilator/wiki/Installing
+    xcode-select --install
 
-You can install the remaining dependencies using the built-in package manager
-like apt-get or yum. The instructions below are for Ubuntu. You may need to
-change the package names for other distributions:
+This installs the remaining packages using [MacPorts](https://www.macports.org/):
 
-    sudo apt-get install gcc g++ python perl emacs openjdk-7-jdk gtkwave imagemagick libsdl2-dev
+    sudo port install cmake bison swig swig-python imagemagick libsdl2 curl emacs
 
-    git clone https://github.com/jbush001/NyuziProcessor.git
-    cd NyuziProcessor
-    make
-    make test
-    
-To run 3D renderer (in emulator)
+You may optionally also want to install [GTKWave](http://gtkwave.sourceforge.net/) 
+for analyzing waveform files.
 
-    cd software/apps/sceneview
-    make run
-    
-## Building on MacOS
-
-Build the Nyuzi toolchain following instructions in
-https://github.com/jbush001/NyuziToolchain. The host compiler is also
-installed, if not already present, as part of that process.
-
-You will need to build Verilator from source using instructions here:
-
-http://www.veripool.org/projects/verilator/wiki/Installing
-
-MacOS has many of the required packages by default. To install the remaining
-packages, I would recommend a package manager like [MacPorts](https://www.macports.org/). 
-The following commands will set up the project using that:
-
-    sudo port install imagemagick libsdl2
-
-    git clone https://github.com/jbush001/NyuziProcessor.git
-    cd NyuziProcessor
-    make
-    make test
-
-To run 3D renderer (in emulator)
-
-    cd software/sceneview
-    make run
-
-## Building on Windows
+### Windows
 
 I have not tested this on Windows. Many of the libraries are already cross
 platform, so it should theoretically be possible. The easiest route is probably
 to run Linux under VirtualBox or VMWare.
 
+## Build (Linux & MacOS)
+
+Download and build Verilator as follows (while some Linux package managers have
+this, it is way out of date):
+
+    cd tools
+    curl http://www.veripool.org/ftp/verilator-3.876.tgz | tar xz
+    cd verilator-3.876/ 
+    ./configure 
+    make
+    sudo make install
+    cd ../..
+
+Download and build the Nyuzi toolchain as follows (This clones my repo. If you
+want to use your own fork, change the clone URL):
+
+    git clone https://github.com/jbush001/NyuziToolchain.git tools/NyuziToolchain
+    cd tools/NyuziToolchain
+    mkdir build
+    cd build
+    cmake .. 
+    make
+    sudo make install
+    cd ../../..
+	
+Build remaining tools and hardware model. Run unit tests.
+
+    make
+    make test
+
+## What next?
+
+Various sample applications are available in [software/apps](software/apps).
+These can be run in the emulator by typing 'make run' (some may require
+downloading 3rd party data files, details are in the READMEs in those
+directories). 
+
+For example, this will render a 3D model:
+
+    cd software/apps/sceneview
+    make run
+
 # Running on FPGA
 
 See instructions in hardware/fpga/de2-115/README.md
-

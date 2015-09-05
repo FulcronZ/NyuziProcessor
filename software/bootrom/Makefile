@@ -14,21 +14,24 @@
 # limitations under the License.
 # 
 
-COMPILER_DIR=/usr/local/llvm-nyuzi/bin
-CC=$(COMPILER_DIR)/clang
-LD=$(COMPILER_DIR)/ld.mcld
-ELF2HEX=$(COMPILER_DIR)/elf2hex
+TOPDIR=../../
+
+include $(TOPDIR)/build/target.mk
+
 CFLAGS=-O3
 BASE_ADDRESS=0xfffee000
 
-boot.hex: boot.c start.s
-	$(CC) $(CFLAGS) -c start.s 
-	$(CC) $(CFLAGS) -c boot.c
-	$(LD) -o boot.elf -Ttext=$(BASE_ADDRESS) start.o boot.o
-	$(ELF2HEX) -b $(BASE_ADDRESS) -o boot.hex boot.elf
+SRCS=boot.c start.s
 
-clean: FORCE
-	rm -f boot.elf boot.hex start.o boot.o
+OBJS=$(SRCS_TO_OBJS)
+DEPS=$(SRCS_TO_DEPS)
 
-FORCE:
+boot.hex: $(OBJS) $(DEPS)
+	$(LD) -o $(OBJ_DIR)/boot.elf -Ttext=$(BASE_ADDRESS) $(OBJS)
+	$(ELF2HEX) -b $(BASE_ADDRESS) -o boot.hex $(OBJ_DIR)/boot.elf
+
+clean: 
+	rm -rf obj boot.hex
+	
+-include $(DEPS)
 

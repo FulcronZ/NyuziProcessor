@@ -20,8 +20,8 @@
 
 //
 // Content addressable memory. 
-// Lookup is async: lookup_idx and lookup_hit are asserted the same cycle lookup_key 
-// is presented. The update interface is registered on the edge of clk.  If an update is 
+// Lookup is async: This asserts lookup_idx and lookup_hit the same cycle lookup_key 
+// is asserted. It registers the update signals on the edge of clk.  If an update is 
 // performed to the same address as a lookup in the same clock cycle, it doesn't flag a 
 // match.
 //
@@ -90,14 +90,14 @@ module cam
 
 `ifdef SIMULATION
 	// Test code checks for duplicate entries
-	always_ff @(posedge clk)
+	always_ff @(posedge clk, posedge reset)
 	begin
 		if (!reset && update_en)
 		begin : test
 			for (int i = 0; i < NUM_ENTRIES; i++)
 			begin
 				if (entry_valid[i] && lookup_table[i] == update_key
-					&& i != update_idx)
+					&& INDEX_WIDTH'(i) != update_idx)
 				begin
 					$display("%m: added duplicate entry to CAM");
 					$display("  original slot %d new slot %d", i, update_idx);

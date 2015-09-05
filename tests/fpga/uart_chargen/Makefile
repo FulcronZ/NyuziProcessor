@@ -14,9 +14,10 @@
 # limitations under the License.
 # 
 
-TOOLDIR=/usr/local/llvm-nyuzi/bin
-CC=$(TOOLDIR)/clang
-ELF2HEX=$(TOOLDIR)/elf2hex
+TOPDIR=../../..
+
+include $(TOPDIR)/build/target.mk
+
 CFLAGS=-O3
 
 chargen.hex: chargen.c 
@@ -24,7 +25,7 @@ chargen.hex: chargen.c
 	$(ELF2HEX) -o chargen.hex chargen.elf
 
 run: chargen.hex
-	../../../bin/serial_boot $(SERIAL_PORT) chargen.hex
+	$(SERIAL_BOOT) $(SERIAL_PORT) chargen.hex
 
 clean: FORCE
 	rm -f chargen.elf chargen.hex

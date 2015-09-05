@@ -1,3 +1,4 @@
+#!/bin/sh
 # 
 # Copyright 2011-2015 Jeff Bush
 # 
@@ -14,23 +15,14 @@
 # limitations under the License.
 # 
 
-TOPDIR=../../
+TOPDIR=../../..
 
-include $(TOPDIR)/build/tool.mk
+include $(TOPDIR)/build/target.mk
 
-CFLAGS=-Wall -W -g
-SRCS=mkfs.c
+run:
+	$(AS) -o blinky.elf blinky.S
+	$(ELF2HEX) -o blinky.hex blinky.elf
+	$(SERIAL_BOOT) $(SERIAL_PORT) blinky.hex
 
-OBJS := $(SRCS_TO_OBJS)
-DEPS := $(SRCS_TO_DEPS)
-
-$(BINDIR)/mkfs: $(OBJS)
-	gcc -g -o $@ $(OBJS)
-
-clean:
-	rm -rf $(OBJ_DIR)
-	rm -f $(BINDIR)/mkfs
-
--include $(DEPS)
-
-
+clean: 
+	rm -f blinky.elf blinky.hex

@@ -14,9 +14,10 @@
 # limitations under the License.
 # 
 
-TOOLDIR=/usr/local/llvm-nyuzi/bin
-CC=$(TOOLDIR)/clang
-ELF2HEX=$(TOOLDIR)/elf2hex
+TOPDIR=../../..
+
+include $(TOPDIR)/build/target.mk
+
 CFLAGS=-O3 -I../../../software/libs/libc/include -I../../../software/libs/libos/
 
 sdmmc_dump.hex: sdmmc_dump.c 
@@ -24,7 +25,7 @@ sdmmc_dump.hex: sdmmc_dump.c
 	$(ELF2HEX) -o sdmmc_dump.hex sdmmc_dump.elf
 		
 run: sdmmc_dump.hex
-	../../../bin/serial_boot $(SERIAL_PORT) sdmmc_dump.hex
+	$(SERIAL_BOOT) $(SERIAL_PORT) sdmmc_dump.hex
 
 clean: FORCE
 	rm -f sdmmc_dump.elf sdmmc_dump.hex

@@ -19,12 +19,12 @@
 
 //
 // A single instruction pipeline with L1 instruction & data caches and L2 
-// interconnect logic.
+// interface logic.
 // 
 
 module core
-	#(parameter core_id_t CORE_ID = 0,
-	parameter RESET_PC = 0)
+	#(parameter core_id_t CORE_ID = '0,
+	parameter RESET_PC = '0)
 	
 	(input                                 clk,
 	input                                  reset,

@@ -1,4 +1,3 @@
-#!/bin/sh
 # 
 # Copyright 2011-2015 Jeff Bush
 # 
@@ -15,7 +14,28 @@
 # limitations under the License.
 # 
 
-/usr/local/llvm-nyuzi/bin/clang -o memory_test.elf memory_test.S
-/usr/local/llvm-nyuzi/bin/elf2hex -o memory_test.hex memory_test.elf
-../../../bin/serial_boot $SERIAL_PORT memory_test.hex
+TOPDIR=../../../
+
+include $(TOPDIR)/build/target.mk
+
+LIBS=-lc -los
+SRCS=membench.c
+
+OBJS=$(TOPDIR)/software/libs/libc/crt0.o $(SRCS_TO_OBJS)
+DEPS=$(SRCS_TO_DEPS)
+
+$(OBJ_DIR)/membench.hex: $(OBJS)
+	$(LD) -o $(OBJ_DIR)/membench.elf $(LDFLAGS) $(OBJS) $(LDFLAGS) $(LIBS)
+	$(ELF2HEX) -o $(OBJ_DIR)/membench.hex $(OBJ_DIR)/membench.elf
+
+run: $(OBJ_DIR)/membench.hex
+	$(EMULATOR) $(OBJ_DIR)/membench.hex
+
+verirun: $(OBJ_DIR)/membench.hex
+	$(VERILATOR) +bin=$(OBJ_DIR)/membench.hex
+
+clean:
+	rm -rf $(OBJ_DIR)
+
+-include $(DEPS)
 

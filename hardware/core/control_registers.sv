@@ -18,8 +18,8 @@
 `include "defines.sv"
 
 //
-// Storage for control registers, special purpose locations that control 
-// processor operation (for example, enabling threads)
+// Storage for control registers, special purpose memory locations that
+// control processor operation (for example, enabling threads)
 //
 
 module control_registers
@@ -42,7 +42,7 @@ module control_registers
 	input scalar_t                          wb_fault_access_addr,
 	input thread_idx_t                      wb_fault_thread_idx,
 	
-	// From dcache_data_stage (dd_ signals are unregistered.  dt_thread_idx 
+	// From dcache_data_stage (dd_XXX signals are unregistered.  dt_thread_idx 
 	// represents thread going into dcache_data_stage)
 	input thread_idx_t                      dt_thread_idx,
 	input                                   dd_creg_write_en,
@@ -117,6 +117,8 @@ module control_registers
 
 					CR_HALT:             cr_thread_enable <= 0;
 					CR_FAULT_HANDLER:    cr_fault_handler <= dd_creg_write_val;
+					default:
+						;
 				endcase
 			end
 			
@@ -126,18 +128,18 @@ module control_registers
 			if (dd_creg_read_en)
 			begin
 				case (dd_creg_index)
-					CR_THREAD_ENABLE:    cr_creg_read_val <= cr_thread_enable;
+					CR_THREAD_ENABLE:    cr_creg_read_val <= scalar_t'(cr_thread_enable);
 					CR_FLAGS:
 					begin
-						cr_creg_read_val <= { 
+						cr_creg_read_val <= scalar_t'({ 
 							prev_int_flag[dt_thread_idx],
 							cr_interrupt_en[dt_thread_idx] 
-						};
+						});
 					end
 
-					CR_THREAD_ID:        cr_creg_read_val <= { CORE_ID, dt_thread_idx };
+					CR_THREAD_ID:        cr_creg_read_val <= scalar_t'({ CORE_ID, dt_thread_idx });
 					CR_FAULT_PC:         cr_creg_read_val <= cr_eret_address[dt_thread_idx];
-					CR_FAULT_REASON:     cr_creg_read_val <= fault_reason[dt_thread_idx];
+					CR_FAULT_REASON:     cr_creg_read_val <= scalar_t'(fault_reason[dt_thread_idx]);
 					CR_FAULT_HANDLER:    cr_creg_read_val <= cr_fault_handler;
 					CR_FAULT_ADDRESS:    cr_creg_read_val <= fault_access_addr[dt_thread_idx];
 					CR_CYCLE_COUNT:      cr_creg_read_val <= cycle_count;

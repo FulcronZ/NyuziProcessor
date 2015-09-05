@@ -21,8 +21,8 @@
 // Floating Point Execute Stage 4
 //
 // Floating point addition/multiplication
-// - Leading zero detection to determine normalization shift amount for addition
-// - Multiplication result is pass through.  Could have second stage of wallace tree here.
+// - Find leading zero to determine how much to shift to normalize for addition
+// - Pass through multiplication result. Could have second stage of wallace tree here.
 // 
 
 module fp_execute_stage4(
@@ -79,9 +79,7 @@ module fp_execute_stage4(
 	generate
 		for (lane_idx = 0; lane_idx < `VECTOR_LANES; lane_idx++)
 		begin : lane_logic_gen
-			int leading_zeroes;
-			logic[24:0] significand_from_mx3;
-			logic[5:0] norm_shift_nxt;
+			logic[5:0] leading_zeroes;
 			
 			// Leading zero detection: determine normalization shift amount for add/sub.
 			always_comb
@@ -150,11 +148,11 @@ module fp_execute_stage4(
 		begin
 			/*AUTORESET*/
 			// Beginning of autoreset for uninitialized flops
-			fx4_instruction <= 1'h0;
-			fx4_instruction_valid <= 1'h0;
-			fx4_mask_value <= 1'h0;
-			fx4_subcycle <= 1'h0;
-			fx4_thread_idx <= 1'h0;
+			fx4_instruction <= '0;
+			fx4_instruction_valid <= '0;
+			fx4_mask_value <= '0;
+			fx4_subcycle <= '0;
+			fx4_thread_idx <= '0;
 			// End of automatics
 		end
 		else
@@ -170,4 +168,5 @@ endmodule
 
 // Local Variables:
 // verilog-typedef-regexp:"_t$"
+// verilog-auto-reset-widths:unbased
 // End:

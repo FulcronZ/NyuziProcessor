@@ -18,7 +18,7 @@
 BINDIR=../bin
 TARGET=$(BINDIR)/verilator_model
 MIN_VERILATOR_VERSION=864
-VERILATOR_OPTIONS=--unroll-count 512 -Wno-fatal --assert -Werror-IMPLICIT 
+VERILATOR_OPTIONS=--unroll-count 512 --assert -Werror-IMPLICIT -Wwarn-syncasyncnet -Wwarn-blkseq
 
 ifeq (${VERILATOR_TRACE},1)
 	VERILATOR_OPTIONS+=--trace --trace-structs
@@ -38,7 +38,7 @@ core/srams.inc: $(TARGET)
 autos: FORCE
 	emacs --batch core/*.sv -f verilog-batch-auto -f save-buffer
 	emacs --batch testbench/*.sv  -f verilog-batch-auto -f save-buffer
-	emacs --batch fpga/*.sv  -f verilog-batch-auto -f save-buffer
+	emacs --batch fpga/common/*.sv  -f verilog-batch-auto -f save-buffer
 
 test_verilator_version:
 	@if [ $$(verilator --version | cut -f2 -d ' ' | cut -f2 -d .) -lt  $(MIN_VERILATOR_VERSION) ]; \

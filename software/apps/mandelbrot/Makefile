@@ -14,24 +14,28 @@
 # limitations under the License.
 # 
 
+TOPDIR=../../../
 
-TOOLDIR=/usr/local/llvm-nyuzi/bin
-CC=$(TOOLDIR)/clang
-ELF2HEX=$(TOOLDIR)/elf2hex
-CFLAGS=-O3 -I../../libs/libc/include
+include $(TOPDIR)/build/target.mk
 
-mandelbrot.hex: mandelbrot.c 
-	$(CC) $(CFLAGS) mandelbrot.c ../../libs/libc/crt0.o ../../libs/libc/libc.a ../../libs/libos/libos.a -o mandelbrot.elf
-	$(ELF2HEX) -o mandelbrot.hex mandelbrot.elf
+LIBS=-lc -los
+SRCS=mandelbrot.c
 
-run: mandelbrot.hex
-	../../../bin/emulator -f 640x480 mandelbrot.hex
+OBJS := $(TOPDIR)/software/libs/libc/crt0.o $(SRCS_TO_OBJS)
+DEPS := $(SRCS_TO_DEPS)
 
-fpgarun: mandelbrot.hex
-	../../../bin/serial_boot $(SERIAL_PORT) mandelbrot.hex
+$(OBJ_DIR)/mandelbrot.hex: $(OBJS)
+	$(LD) -o $(OBJ_DIR)/mandelbrot.elf $(LDFLAGS) $(OBJS) $(LDFLAGS) $(LIBS)
+	$(ELF2HEX) -o $(OBJ_DIR)/mandelbrot.hex $(OBJ_DIR)/mandelbrot.elf
 
-clean: FORCE
-	rm -f mandelbrot.elf mandelbrot.hex
+run: $(OBJ_DIR)/mandelbrot.hex
+	$(EMULATOR) -f 640x480 $(OBJ_DIR)/mandelbrot.hex
 
-FORCE:
+fpgarun: $(OBJ_DIR)/mandelbrot.hex
+	$(SERIAL_BOOT) $(SERIAL_PORT) $(OBJ_DIR)/mandelbrot.hex
+
+clean:
+	rm -rf $(OBJ_DIR)
+
+-include $(DEPS)
 

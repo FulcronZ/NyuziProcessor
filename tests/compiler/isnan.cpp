@@ -1,5 +1,5 @@
 // 
-// Copyright 2011-2015 Jeff Bush
+// Copyright 2015 Jeff Bush
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,12 +14,20 @@
 // limitations under the License.
 // 
 
-#ifndef __SDMMC_H
-#define __SDMMC_H
+#include <stdio.h>
 
-int openBlockDevice(const char *filename);
-void closeBlockDevice(void);
-void writeSdCardRegister(unsigned int address, unsigned int value);
-unsigned readSdCardRegister(unsigned int address);
+int __attribute__ ((noinline)) isnan(float a) 
+{
+    return !(a==a);
+}
 
-#endif
+int main(int argc, const char *argv[])
+{
+	float a = 0.0;
+	float b = 0.0 / a;
+  
+	printf("isnan1:%d\n", isnan(a));	// CHECK: isnan1:0
+	printf("isnan2:%d\n", isnan(b));	// CHECK: isnan2:1
+}
+
+

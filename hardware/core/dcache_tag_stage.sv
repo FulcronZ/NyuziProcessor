@@ -19,10 +19,10 @@
 
 //
 // Instruction Pipeline L1 Data cache tag stage.
-// Contains tags and cache line states.  These are queried when a memory access 
-// occurs.  There is one cycle of latency to fetch these, so they will be 
+// Contains tags and cache line states.  It queries these when a memory access 
+// occurs. There is one cycle of latency to fetch these, so they will be 
 // checked by the next stage. The L1 data cache is set associative. There is a 
-// separate block of tag ram for each way, which are read in parallel.  The next
+// separate block of tag ram for each way, which this reads in parallel.  The next
 // stage will check them to see if there is a cache hit on one of the ways.
 //
 
@@ -32,7 +32,6 @@ module dcache_tag_stage
                                                 
 	// From operand fetch stage                 
 	input vector_t                              of_operand1,
-	input vector_t                              of_operand2,
 	input vector_lane_mask_t                    of_mask_value,
 	input vector_t                              of_store_value,
 	input                                       of_instruction_valid,
@@ -75,17 +74,18 @@ module dcache_tag_stage
 	input thread_idx_t                          wb_rollback_thread_idx);
 
 	l1d_addr_t request_addr_nxt;
-	l1d_set_idx_t request_set;
 	logic is_io_address;
 	logic memory_read_en;
 	logic memory_access_en;
+	logic[$clog2(`VECTOR_LANES) - 1:0] scgath_lane;
 
 	assign memory_access_en = of_instruction_valid 
 		&& (!wb_rollback_en || wb_rollback_thread_idx != of_thread_idx) 
 		&& of_instruction.pipeline_sel == PIPE_MEM;
 	assign memory_read_en = memory_access_en && of_instruction.is_load;
-	assign is_io_address = request_addr_nxt[31:16] == 16'hffff;
-	assign request_addr_nxt = of_operand1[~of_subcycle] + of_instruction.immediate_value;
+	assign is_io_address = request_addr_nxt ==? 32'hffff????;
+	assign scgath_lane = ~of_subcycle;
+	assign request_addr_nxt = of_operand1[scgath_lane] + of_instruction.immediate_value;
 
 	//
 	// Way metadata
@@ -95,7 +95,7 @@ module dcache_tag_stage
 		for (way_idx = 0; way_idx < `L1D_WAYS; way_idx++)
 		begin : way_tag_gen
 			// Valid flags are flops instead of SRAM because they need
-			// to be all simulatenously cleared on reset.
+			// to be simultaneously cleared on reset.
 			logic line_valid[`L1D_SETS];
 
 			sram_2r1w #(
@@ -164,13 +164,13 @@ module dcache_tag_stage
 		begin
 			/*AUTORESET*/
 			// Beginning of autoreset for uninitialized flops
-			dt_instruction <= 1'h0;
-			dt_instruction_valid <= 1'h0;
-			dt_mask_value <= 1'h0;
-			dt_request_addr <= 1'h0;
-			dt_store_value <= 1'h0;
-			dt_subcycle <= 1'h0;
-			dt_thread_idx <= 1'h0;
+			dt_instruction <= '0;
+			dt_instruction_valid <= '0;
+			dt_mask_value <= '0;
+			dt_request_addr <= '0;
+			dt_store_value <= '0;
+			dt_subcycle <= '0;
+			dt_thread_idx <= '0;
 			// End of automatics
 		end
 		else
@@ -189,4 +189,5 @@ endmodule
 
 // Local Variables:
 // verilog-typedef-regexp:"_t$"
+// verilog-auto-reset-widths:unbased
 // End:

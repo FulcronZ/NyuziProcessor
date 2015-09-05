@@ -28,8 +28,6 @@
 
 extern void remoteGdbMainLoop(Core *core, int enableFbWindow);
 
-int gScreenRefreshRate = 500000;
-
 static void usage(void)
 {
 	fprintf(stderr, "usage: emulator [options] <hex image file>\n");
@@ -43,8 +41,16 @@ static void usage(void)
 	fprintf(stderr, "  -d <filename>,<start>,<length>  Dump memory\n");
 	fprintf(stderr, "  -b <filename> Load file into a virtual block device\n");
 	fprintf(stderr, "  -t <num> Total threads (default 4)\n");
-	fprintf(stderr, "  -c <size> Total amount of memory (hex)\n");
+	fprintf(stderr, "  -c <size> Total amount of memory\n");
 	fprintf(stderr, "  -r <cycles> Refresh rate, cycles between each screen update\n");
+}
+
+static uint32_t parseNumArg(const char *argval)
+{
+	if (argval[0] == '0' && argval[1] == 'x')
+		return (uint32_t) strtoul(argval + 2, NULL, 16);
+	else
+		return (uint32_t) strtoul(argval, NULL, 10);
 }
 
 int main(int argc, char *argv[])
@@ -53,16 +59,16 @@ int main(int argc, char *argv[])
 	int c;
 	int enableMemoryDump = 0;
 	uint32_t memDumpBase = 0;
-	size_t memDumpLength = 0;
+	uint32_t memDumpLength = 0;
 	char memDumpFilename[256];
 	int verbose = 0;
-	int fbWidth = 640;
-	int fbHeight = 480;
+	uint32_t fbWidth = 640;
+	uint32_t fbHeight = 480;
 	int blockDeviceOpen = 0;
 	int enableFbWindow = 0;
-	int totalThreads = 4;
+	uint32_t totalThreads = 4;
 	char *separator;
-	size_t memorySize = 0x1000000;
+	uint32_t memorySize = 0x1000000;
 	
 	enum
 	{
@@ -88,7 +94,7 @@ int main(int argc, char *argv[])
 				break;
 				
 			case 'r':
-				gScreenRefreshRate = atoi(optarg);
+				gScreenRefreshRate = parseNumArg(optarg);
 				break;
 				
 			case 'f':
@@ -100,8 +106,8 @@ int main(int argc, char *argv[])
 					return 1;
 				}
 
-				fbWidth = atoi(optarg);
-				fbHeight = atoi(separator + 1);
+				fbWidth = parseNumArg(optarg);
+				fbHeight = parseNumArg(separator + 1);
 				break;
 				
 			case 'm':
@@ -132,7 +138,7 @@ int main(int argc, char *argv[])
 				
 				strncpy(memDumpFilename, optarg, separator - optarg);
 				memDumpFilename[separator - optarg] = '\0';
-				memDumpBase = strtol(separator + 1, NULL, 16);
+				memDumpBase = parseNumArg(separator + 1);
 	
 				separator = strchr(separator + 1, ',');
 				if (separator == NULL)
@@ -142,7 +148,7 @@ int main(int argc, char *argv[])
 					return 1;
 				}
 				
-				memDumpLength = strtol(separator + 1, NULL, 16);
+				memDumpLength = parseNumArg(separator + 1);
 				enableMemoryDump = 1;
 				break;
 				
@@ -157,11 +163,11 @@ int main(int argc, char *argv[])
 				break;
 			
 			case 'c':
-				memorySize = strtol(optarg, NULL, 16);
+				memorySize = parseNumArg(optarg);
 				break;
 				
 			case 't':
-				totalThreads = atoi(optarg);
+				totalThreads = parseNumArg(optarg);
 				if (totalThreads < 1 || totalThreads > 32)
 				{
 					fprintf(stderr, "Total threads must be between 1 and 32\n");
@@ -206,14 +212,14 @@ int main(int argc, char *argv[])
 			setStopOnFault(core, 1);
 			if (enableFbWindow)
 			{
-				while (executeInstructions(core, -1, gScreenRefreshRate))
+				while (executeInstructions(core, ALL_THREADS, gScreenRefreshRate))
 				{
 					updateFB(getCoreFb(core));
 					pollEvent();
 				}
 			}
 			else
-				executeInstructions(core, -1, 0x7fffffff);
+				executeInstructions(core, ALL_THREADS, 0x7fffffffu);
 
 			break;
 

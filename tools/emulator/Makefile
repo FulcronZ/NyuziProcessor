@@ -14,13 +14,22 @@
 # limitations under the License.
 # 
 
+TOPDIR=../../
 
-BINDIR=../../bin
+include $(TOPDIR)/build/tool.mk
+
 TARGET=$(BINDIR)/emulator
-OBJDIR=OBJECTS
-CFLAGS = -Wall -W -O3 $(shell sdl2-config --cflags)
 
-#CFLAGS += -DLOG_INSTRUCTIONS=1
+ifneq (,$(findstring clang, $(shell $(CC) --version)))
+	# -Weverything is only supported on clang
+	WARNINGS =-Weverything -Wno-padded -Wno-float-equal -Wno-covered-switch-default -Wno-switch-enum -Wno-bad-function-cast -Wno-documentation -Wno-documentation-unknown-command
+else
+	WARNINGS=-Wall -W 
+endif
+
+CFLAGS=-O3 $(WARNINGS) $(shell sdl2-config --cflags)
+
+#CFLAGS += -DLOG_INSTRUCTIONS
 
 SRCS=main.c \
 	core.c \
@@ -34,25 +43,20 @@ SRCS=main.c \
 
 LIBS=-lm $(shell sdl2-config --libs)
 
-OBJS := $(SRCS:%.c=$(OBJDIR)/%.o)
-DEPS := $(SRCS:%.c=$(OBJDIR)/%.o.d)
+OBJS := $(SRCS_TO_OBJS)
+DEPS := $(SRCS_TO_DEPS)
 
 all: $(OBJDIR) $(BINDIR) $(TARGET)
 
-$(TARGET): $(OBJS)
+$(TARGET): $(OBJS) $(DEPS)
+	echo $(OBJS)
 	gcc -g -o $@ $(OBJS) $(LIBS)
 
-$(OBJDIR)/%.o: %.c
-	$(CC) -o $@ $(CFLAGS) -c $< -MMD -MF $@.d
-
-$(OBJDIR):
-	mkdir -p $(OBJDIR)
+clean:
+	rm -rf $(OBJ_DIR)
+	rm -f $(TARGET)
 
 $(BINDIR):
 	mkdir -p $(BINDIR)
-
-clean:
-	rm -rf $(OBJDIR)
-	rm -f $(TARGET)
 
 -include $(DEPS)

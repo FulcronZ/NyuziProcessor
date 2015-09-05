@@ -120,7 +120,6 @@ module dcache_data_stage(
 	cache_line_data_t endian_twiddled_data;
 	scalar_t lane_store_value;
 	logic is_io_address;
-	scalar_t scatter_gather_ptr;
 	logic[`CACHE_LINE_WORDS - 1:0] cache_lane_mask;
 	logic[`CACHE_LINE_WORDS - 1:0] subcycle_mask;
 	logic[`L1D_WAYS - 1:0] way_hit_oh;
@@ -136,13 +135,14 @@ module dcache_data_stage(
 	logic is_unaligned_access;
 	logic is_synchronized;
 	logic is_valid_cache_control;
-	
+	logic[$clog2(`VECTOR_LANES) - 1:0] scgath_lane;
+
 	// rollback_this_stage indicates a rollback was requested from an earlier issued
 	// instruction, but it does not get set when this stage is triggering a rollback.
 	assign rollback_this_stage = wb_rollback_en 
 		&& wb_rollback_thread_idx == dt_thread_idx
 		&& wb_rollback_pipeline == PIPE_MEM;
-	assign is_io_address = dt_request_addr[31:16] == 16'hffff;
+	assign is_io_address = dt_request_addr ==? 32'hffff????;
 	assign is_synchronized = dt_instruction.memory_access_type == MEM_SYNC;
 	assign dcache_access_req = dt_instruction_valid 
 		&& dt_instruction.is_memory_access 
@@ -209,8 +209,8 @@ module dcache_data_stage(
 		end
 	endgenerate
 
-	// A synchronized load is always treated as a load miss the first time it is issued, because
-	// it needs to register itself with the L2 cache.
+	// This treats a synchronized load as a cache miss the first time it occurs, because
+	// it needs to send it to the L2 cache to register it.
 	assign cache_hit = |way_hit_oh && (!is_synchronized || sync_load_pending[dt_thread_idx]);
 
 	//
@@ -233,7 +233,7 @@ module dcache_data_stage(
 			
 			MEM_SCGATH, MEM_SCGATH_M:	// Scatter/Gather access
 			begin
-				if (dt_mask_value & subcycle_mask)
+				if ((dt_mask_value & subcycle_mask) != 0)
 					word_store_mask = cache_lane_mask;
 				else
 					word_store_mask = 0;
@@ -256,7 +256,8 @@ module dcache_data_stage(
 		end
 	endgenerate
 
-	assign lane_store_value = dt_store_value[~dt_subcycle];
+	assign scgath_lane = ~dt_subcycle;
+	assign lane_store_value = dt_store_value[scgath_lane];
 
 	// byte_store_mask and dd_store_data.
 	always_comb
@@ -316,9 +317,9 @@ module dcache_data_stage(
 		endcase
 	end
 
-	// Generate store mask signals.  word_store_mask corresponds to lanes, byte_store_mask
-	// corresponds to bytes within a word.  byte_store_mask always
-	// has all bits set if word_store_mask has more than one bit set. That is:
+	// Generate store mask signals.  word_store_mask corresponds to lanes, 
+	// byte_store_mask corresponds to bytes within a word.  byte_store_mask 
+	// always has all bits set if word_store_mask has more than one bit set:
 	// we are either selecting some number of words within the cache line for
 	// a vector transfer or some bytes within a specific word for a scalar transfer.
 	genvar mask_idx;
@@ -350,11 +351,12 @@ module dcache_data_stage(
 		.write_data(l2i_ddata_update_data),
 		.*);
 
-	// Cache miss occured in the cycle the same line is being filled. If we suspend the thread here,
-	// it will never receive a wakeup. Instead roll the thread back and let it retry.
-	// This must not be set if the load is synchronized: it must do a round trip to the L2 cache
-	// to register the address regardless of whether the data is the cache.
-	assign cache_near_miss = !cache_hit 
+	// cache_near_miss indicates a cache miss is occurring in the cycle this is 
+	// filling the same line. If we suspend the thread here, it will never 
+	// receive a wakeup. Instead, roll the thread back and let it retry. This 
+	// must not be set for a synchronized load (even if the data is in the L1 
+	// cache): it must do a round trip to the L2 cache to latch the address.
+	assign cache_near_miss = !cache_hit
 		&& dcache_load_req 
 		&& |l2i_dtag_update_en_oh
 		&& l2i_dtag_update_set == dt_request_addr.set_idx 
@@ -371,26 +373,27 @@ module dcache_data_stage(
 	assign dd_update_lru_en = cache_hit && dcache_access_req && !is_unaligned_access;
 	assign dd_update_lru_way = way_hit_idx;
 
-	// The first synchronized load is always a miss (even if data is 
-	// present) in order to register request with L2 cache.  The second 
-	// will not be a miss (if the data is cached).  sync_load_pending 
-	// tracks this state. 
+	// The first synchronized load is always treated as a miss (even if data is 
+	// present) to register request with L2 cache.  The second will not be a miss 
+	// if the data is in the cache (there is a window where it could be before the 
+	// thread can fetch it, in which case it will fail and restart).
+	// sync_load_pending tracks if this is the first or second request. 
 	genvar thread_idx;
 	generate
 		for (thread_idx = 0; thread_idx < `THREADS_PER_CORE; thread_idx++)
 		begin : sync_pending_gen
-			always @(posedge clk, posedge reset)
+			always_ff @(posedge clk, posedge reset)
 			begin
 				if (reset)
 					sync_load_pending[thread_idx] <= 0;
 				else if (interrupt_pending && wb_interrupt_ack 
-					&& interrupt_thread_idx == thread_idx)
+					&& interrupt_thread_idx == thread_idx_t'(thread_idx))
 				begin
-					// If a thread is interrupted while waiting on a synchronized load, 
-					// reset the sync load pending flag.
+					// If a thread dispatches an interrupt while waiting on a synchronized 
+					// load, reset the sync load pending flag.
 					sync_load_pending[thread_idx] <= 0;
 				end 
-				else if (dcache_load_req && is_synchronized && dt_thread_idx == thread_idx)
+				else if (dcache_load_req && is_synchronized && dt_thread_idx == thread_idx_t'(thread_idx))
 				begin
 					// Track if this is the first or restarted request.
 					sync_load_pending[thread_idx] <= !sync_load_pending[thread_idx];
@@ -405,17 +408,17 @@ module dcache_data_stage(
 		begin
 			/*AUTORESET*/
 			// Beginning of autoreset for uninitialized flops
-			dd_access_fault <= 1'h0;
-			dd_instruction <= 1'h0;
-			dd_instruction_valid <= 1'h0;
-			dd_is_io_address <= 1'h0;
-			dd_lane_mask <= 1'h0;
-			dd_request_addr <= 1'h0;
-			dd_rollback_en <= 1'h0;
-			dd_rollback_pc <= 1'h0;
-			dd_subcycle <= 1'h0;
-			dd_suspend_thread <= 1'h0;
-			dd_thread_idx <= 1'h0;
+			dd_access_fault <= '0;
+			dd_instruction <= '0;
+			dd_instruction_valid <= '0;
+			dd_is_io_address <= '0;
+			dd_lane_mask <= '0;
+			dd_request_addr <= '0;
+			dd_rollback_en <= '0;
+			dd_rollback_pc <= '0;
+			dd_subcycle <= '0;
+			dd_suspend_thread <= '0;
+			dd_thread_idx <= '0;
 			// End of automatics
 		end
 		else
@@ -447,4 +450,5 @@ endmodule
 
 // Local Variables:
 // verilog-typedef-regexp:"_t$"
+// verilog-auto-reset-widths:unbased
 // End:

@@ -1,4 +1,3 @@
-#!/bin/sh
 # 
 # Copyright 2011-2015 Jeff Bush
 # 
@@ -15,6 +14,29 @@
 # limitations under the License.
 # 
 
-/usr/local/llvm-nyuzi/bin/clang -o blinky.elf blinky.S
-/usr/local/llvm-nyuzi/bin/elf2hex -o blinky.hex blinky.elf
-../../../bin/serial_boot $SERIAL_PORT blinky.hex
+TOPDIR=../../../
+
+include $(TOPDIR)/build/target.mk
+
+LIBS=-lc -los
+SRCS=plasma.cpp
+CFLAGS+=-ffast-math -std=c++11
+
+OBJS := $(TOPDIR)/software/libs/libc/crt0.o $(SRCS_TO_OBJS)
+DEPS := $(SRCS_TO_DEPS)
+
+$(OBJ_DIR)/plasma.hex: $(OBJS)
+	$(LD) -o $(OBJ_DIR)/plasma.elf $(LDFLAGS) $(OBJS) $(LDFLAGS) $(LIBS)
+	$(ELF2HEX) -o $(OBJ_DIR)/plasma.hex $(OBJ_DIR)/plasma.elf
+
+run: $(OBJ_DIR)/plasma.hex
+	$(EMULATOR) -f 640x480 $(OBJ_DIR)/plasma.hex
+
+fpgarun: $(OBJ_DIR)/plasma.hex
+	$(SERIAL_BOOT) $(SERIAL_PORT) $(OBJ_DIR)/plasma.hex
+
+clean:
+	rm -rf $(OBJ_DIR)
+
+-include $(DEPS)
+

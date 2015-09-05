@@ -1,3 +1,4 @@
+#!/bin/sh
 # 
 # Copyright 2011-2015 Jeff Bush
 # 
@@ -14,26 +15,14 @@
 # limitations under the License.
 # 
 
+TOPDIR=../../..
 
-COMPILER_DIR=/usr/local/llvm-nyuzi/bin
-VERILATOR=../../../bin/verilator_model
-CC=$COMPILER_DIR/clang
-ELF2HEX=$COMPILER_DIR/elf2hex
-HEXFILE=WORK/program.hex
-ELFFILE=WORK/program.elf
+include $(TOPDIR)/build/target.mk
 
-mkdir -p WORK
+run:
+	$(AS) -o memory_test.elf memory_test.S
+	$(ELF2HEX) -o memory_test.hex memory_test.elf
+	$(SERIAL_BOOT) $(SERIAL_PORT) memory_test.hex
 
-function compileAndRun {
-	# Build
-	$CC -O3 -o $ELFFILE $1 ../../../software/libs/libc/crt0.o
-	$ELF2HEX -o $HEXFILE $ELFFILE
-
-	# Run, collect results
-	echo "running $1"
-	$VERILATOR +bin=WORK/program.hex | awk '/ran for/{ print 1048576 / $3 " bytes/cycle" }'
-}
-
-compileAndRun 'read_test.cpp'
-compileAndRun 'write_test.cpp'
-compileAndRun 'copy_test.cpp'
+clean: 
+	rm -f memorytest.elf memory_test.hex

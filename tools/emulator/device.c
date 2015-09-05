@@ -23,6 +23,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include "core.h"
+#include "device.h"
 #include "sdmmc.h"
 
 #define KEY_BUFFER_SIZE 32
@@ -79,7 +80,7 @@ uint32_t readDeviceRegister(uint32_t address)
 			{
 				struct timeval tv;
 				gettimeofday(&tv, NULL);
-				return tv.tv_sec * 1000000 + tv.tv_usec;
+				return (uint32_t)(tv.tv_sec * 1000000 + tv.tv_usec);
 			}
 
 		case 0x48:

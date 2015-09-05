@@ -93,26 +93,26 @@ module fp_execute_stage3(
 			logic round_up;
 			logic round_tie;
 			logic do_round;
-			logic _ignore;
+			logic _unused;
 
-			// Round-to-nearest, round half to even.  We first compute the value of only the low
-			// bit of the sum independently here to predict if the result is odd.
+			// Round-to-nearest, round half to even.  Compute the value of the low bit 
+			// of the sum to predict if the result is odd.
 			assign sum_is_odd = fx2_significand_le[lane_idx][0] ^ fx2_significand_se[lane_idx][0];
 			assign round_tie = (fx2_guard[lane_idx] && !(fx2_round[lane_idx] || fx2_sticky[lane_idx]));
 			assign round_up = (fx2_guard[lane_idx] && (fx2_round[lane_idx] || fx2_sticky[lane_idx]));
 			assign do_round = (round_up || (sum_is_odd && round_tie));
 			
-			// For logical subtraction, rounding reduces the unnormalized sum because it rounds the
-			// subtrahend up.  Since we are inverting the second parameter to perform a subtraction,
-			// a +1 is normally necessary. We round down by not doing that. For logical addition, rounding 
-			// increases the unnormalized sum.  We can accomplish either of these by setting carry_in 
-			// appropriately.
+			// For logical subtraction, rounding reduces the unnormalized sum because 
+			// it rounds the subtrahend up.  Since we are inverting the second parameter 
+			// to perform a subtraction, a +1 is normally necessary. We round down by 
+			// not doing that. For logical addition, rounding increases the unnormalized 
+			// sum.  We can do either of these by setting carry_in appropriately.
 			//
 			// For float<->int conversions, we overload this to handle changing between signed-magnitude
 			// and two's complement format.  LE is set to zero and fx2_logical_subtract indicates
 			// if it needs a conversion.
 			assign carry_in = fx2_logical_subtract[lane_idx] ^ (do_round && !is_ftoi);
-			assign { unnormalized_sum, _ignore } = { fx2_significand_le[lane_idx], 1'b1 } 
+			assign { unnormalized_sum, _unused } = { fx2_significand_le[lane_idx], 1'b1 } 
 				+ { (fx2_significand_se[lane_idx] ^ {32{fx2_logical_subtract[lane_idx]}}), carry_in };
 
 			always_ff @(posedge clk)
@@ -141,11 +141,11 @@ module fp_execute_stage3(
 		begin
 			/*AUTORESET*/
 			// Beginning of autoreset for uninitialized flops
-			fx3_instruction <= 1'h0;
-			fx3_instruction_valid <= 1'h0;
-			fx3_mask_value <= 1'h0;
-			fx3_subcycle <= 1'h0;
-			fx3_thread_idx <= 1'h0;
+			fx3_instruction <= '0;
+			fx3_instruction_valid <= '0;
+			fx3_mask_value <= '0;
+			fx3_subcycle <= '0;
+			fx3_thread_idx <= '0;
 			// End of automatics
 		end
 		else
@@ -161,4 +161,5 @@ endmodule
 
 // Local Variables:
 // verilog-typedef-regexp:"_t$"
+// verilog-auto-reset-widths:unbased
 // End:

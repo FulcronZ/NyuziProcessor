@@ -20,14 +20,15 @@
 //
 // L2 AXI Bus Interface
 // Receives L2 cache misses and writeback requests from the L2 pipeline and controls
-// AXI system memory interface to fulfill them.  When misses are fulfilled, they are
-// reissued into the pipeline via the arbiter.
+// AXI system memory interface to fulfill them.  When fills complete, this reissues
+// them to the L2 pipeline via the arbiter.
 //
-// If the request for this line is already being handled, we set a flag
-// that causes the request to be reissued, but won't actually
-// perform the memory transaction.
+// If this is already handling the request for a line, it set a flag that causes it 
+// to reissue the request to the L2 pipeline, but doesn't actually perform the 
+// memory transaction.
 //
-// The interface to system memory is a simplified subset of the AMBA AXI interface.
+// The interface to system memory is the AMBA AXI interface.
+// http://www.arm.com/products/system-ip/amba-specifications.php
 //
 
 module l2_axi_bus_interface(
@@ -79,6 +80,7 @@ module l2_axi_bus_interface(
 	logic enqueue_load_request;
 	logic duplicate_request;
 	cache_line_data_t bif_writeback_data;	
+	logic[`AXI_DATA_WIDTH - 1:0] bif_writeback_lanes[BURST_BEATS];
 	logic writeback_queue_empty;
 	logic load_queue_empty;
 	logic load_request_pending;
@@ -158,12 +160,12 @@ module l2_axi_bus_interface(
 
 	// AMBA AXI and ACE Protocol Specification, rev E, A3.4.1:
 	// length field is is burst length - 1
-	assign axi_bus.m_awlen = BURST_BEATS - 1;	
-	assign axi_bus.m_arlen = BURST_BEATS - 1;	
+	assign axi_bus.m_awlen = 8'(BURST_BEATS - 1);	
+	assign axi_bus.m_arlen = 8'(BURST_BEATS - 1);	
 	assign axi_bus.m_bready = 1'b1;
 	
 	// ibid, Table A3-2
-	assign axi_bus.m_arsize = `AXI_DATA_WIDTH == 1 ? 0 : $clog2(`AXI_DATA_WIDTH / 8);	
+	assign axi_bus.m_arsize = `AXI_DATA_WIDTH == 1 ? 3'd0 : 3'($clog2(`AXI_DATA_WIDTH / 8));	
 	assign axi_bus.m_awsize = axi_bus.m_arsize;
 
 	assign axi_bus.m_awburst = AXI_BURST_INCR;
@@ -221,9 +223,9 @@ module l2_axi_bus_interface(
 						// 1. If there is already a pending L2 miss for this cache 
 						//    line.  Some other request has filled it, so we 
 						//    don't need to do anything but (try to) pick up the 
-						//    result (that could result in another miss in some
+						//    result. That could result in another miss in some
 						//    cases, in which case we must make another pass through
-						//    here).
+						//    here.
 						// 2. It is a store that replaces the entire line.
 						//    We let this flow through the read miss queue instead
 						//    of handling it immediately in the pipeline
@@ -247,13 +249,13 @@ module l2_axi_bus_interface(
 			begin
 				if (axi_bus.s_wready)
 				begin
-					if (burst_offset_ff == BURST_BEATS - 1)
+					if (burst_offset_ff == {BURST_OFFSET_WIDTH{1'b1}})
 					begin
 						writeback_complete = 1;
 						state_nxt = STATE_IDLE;
 					end
 
-					burst_offset_nxt = burst_offset_ff + 1;
+					burst_offset_nxt = burst_offset_ff + BURST_OFFSET_WIDTH'(1);
 				end
 			end
 
@@ -268,10 +270,10 @@ module l2_axi_bus_interface(
 			begin
 				if (axi_bus.s_rvalid)
 				begin
-					if (burst_offset_ff == BURST_BEATS - 1)
+					if (burst_offset_ff == {BURST_OFFSET_WIDTH{1'b1}})
 						state_nxt = STATE_READ_COMPLETE;
 
-					burst_offset_nxt = burst_offset_ff + 1;
+					burst_offset_nxt = burst_offset_ff + BURST_OFFSET_WIDTH'(1);
 				end
 			end
 
@@ -284,6 +286,15 @@ module l2_axi_bus_interface(
 		endcase
 	end
 
+	genvar writeback_lane;
+	generate
+		for (writeback_lane = 0; writeback_lane < BURST_BEATS; writeback_lane++)
+		begin : writeback_lane_gen
+			assign bif_writeback_lanes[writeback_lane] = bif_writeback_data[writeback_lane * `AXI_DATA_WIDTH+:
+				`AXI_DATA_WIDTH];
+		end
+	endgenerate
+
 	always_ff @(posedge clk, posedge reset)
 	begin : update
 		if (reset)
@@ -294,16 +305,16 @@ module l2_axi_bus_interface(
 			state_ff <= STATE_IDLE;
 			/*AUTORESET*/
 			// Beginning of autoreset for uninitialized flops
-			axi_bus.m_araddr <= 1'h0;
-			axi_bus.m_arvalid <= 1'h0;
-			axi_bus.m_awaddr <= 1'h0;
-			axi_bus.m_awvalid <= 1'h0;
-			axi_bus.m_rready <= 1'h0;
-			axi_bus.m_wdata <= 1'h0;
-			axi_bus.m_wlast <= 1'h0;
-			axi_bus.m_wvalid <= 1'h0;
-			burst_offset_ff <= {BURST_OFFSET_WIDTH{1'b0}};
-			wait_axi_write_response <= 1'h0;
+			axi_bus.m_araddr <= '0;
+			axi_bus.m_arvalid <= '0;
+			axi_bus.m_awaddr <= '0;
+			axi_bus.m_awvalid <= '0;
+			axi_bus.m_rready <= '0;
+			axi_bus.m_wdata <= '0;
+			axi_bus.m_wlast <= '0;
+			axi_bus.m_wvalid <= '0;
+			burst_offset_ff <= '0;
+			wait_axi_write_response <= '0;
 			// End of automatics
 		end
 		else
@@ -327,14 +338,15 @@ module l2_axi_bus_interface(
 			axi_bus.m_awvalid <= state_nxt == STATE_WRITE_ISSUE_ADDRESS;
 			axi_bus.m_awaddr <= { bif_writeback_address, {`CACHE_LINE_OFFSET_WIDTH{1'b0}} };
 			axi_bus.m_wvalid <= state_nxt == STATE_WRITE_TRANSFER;
-			axi_bus.m_wdata <= bif_writeback_data[~burst_offset_nxt * `AXI_DATA_WIDTH+:`AXI_DATA_WIDTH];
+			axi_bus.m_wdata <= bif_writeback_lanes[~burst_offset_nxt];
 			axi_bus.m_wlast <= state_nxt == STATE_WRITE_TRANSFER	
 				&& axi_bus.s_wready
-				&& burst_offset_ff == BURST_BEATS - 2;
+				&& burst_offset_ff == BURST_OFFSET_WIDTH'(BURST_BEATS) - 2;
 		end
 	end
 endmodule
 
 // Local Variables:
 // verilog-typedef-regexp:"_t$"
+// verilog-auto-reset-widths:unbased
 // End:

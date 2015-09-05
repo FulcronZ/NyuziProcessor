@@ -37,7 +37,7 @@ run as root. This can be remedied by creating a file
 The build system is command line based and does not use the Quartus GUI.
 
 1. Make sure you've compiled the bootrom , either by typing make at the top 
-level, or in the software/bootrom directory.
+   level, or in the software/bootrom directory.
 
 2. Synthesize the design (ensure quartus binary directory is in your PATH, by
    default installed in ~/altera/[version]/quartus/bin/). From this directory:
@@ -52,9 +52,15 @@ level, or in the software/bootrom directory.
 5. Load program into memory and execute it using the runit script as below.
 
         cd ../../../tests/fpga/blinky
-        ./runit.sh
+		make run
 
-Programs can be reloaded by repeating steps 3 & 4. The bitstream does not need
-to be reloaded as long as the board is powered (it will be lost if it is turned off,
-however). Many programs with makefiles have a target 'fpgarun' that will load them
-onto the FPGA board using the serial loader.
+Other notes:
+- Programs can be reloaded by pressing the reset button and executing the runit script
+  or makefile again.
+- Many programs with makefiles have a target 'fpgarun' that will load them
+  onto the FPGA board using the serial loader.
+- The bitstream does not need to be reloaded (step 3) as long as the board is powered 
+  (it will be lost if it is turned off, however). 
+- The program target does not resynthesize the bitstream if source files have changed.
+  This must be done explicitly by typing make.
+
