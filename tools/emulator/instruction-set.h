@@ -122,11 +122,18 @@ enum _ControlRegister {
 	CR_FAULT_REASON = 3,
 	CR_INTERRUPT_ENABLE = 4,
 	CR_FAULT_ADDRESS = 5,
-	CR_CYCLE_COUNT = 6,
-	CR_HALT_THREAD = 29,
-	CR_THREAD_ENABLE = 30,
-	CR_HALT = 31
+	CR_CYCLE_COUNT = 6
 };
 typedef enum _ControlRegister ControlRegister;
+
+enum _FaultReason
+{
+	FR_RESET,
+	FR_ILLEGAL_INSTRUCTION,
+	FR_INVALID_ACCESS,
+	FR_INTERRUPT,
+	FR_IFETCH_FAULT
+};
+typedef enum _FaultReason FaultReason;
 
 #endif

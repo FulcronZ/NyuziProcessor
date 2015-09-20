@@ -20,7 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/time.h>
+#include <time.h>
 #include "core.h"
 #include "cosimulation.h"
 #include "device.h"
@@ -37,19 +37,13 @@
 
 typedef struct Thread Thread;
 
-typedef enum 
-{
-	FR_RESET,
-	FR_ILLEGAL_INSTRUCTION,
-	FR_INVALID_ACCESS,
-	FR_INTERRUPT
-} FaultReason;
+
 
 struct Thread
 {
 	uint32_t id;
 	Core *core;
-	uint32_t linkedAddress;		// Cache line (/ 64)
+	uint32_t linkedAddress; // For synchronized store/load. Cache line (addr / 64)
 	uint32_t currentPc;
 	uint32_t scalarReg[NUM_REGISTERS - 1];	// 31 is PC, which is special
 	uint32_t vectorReg[NUM_REGISTERS][NUM_VECTOR_LANES];
@@ -70,11 +64,11 @@ struct Core
 	struct Breakpoint *breakpoints;
 	uint32_t threadEnableMask;
 	uint32_t faultHandlerPc;
-	uint32_t halt;
-	uint32_t singleStepping;
-	uint32_t stopOnFault;
-	uint32_t enableTracing;
-	uint32_t cosimEnable;
+	bool halt;
+	bool singleStepping;
+	bool stopOnFault;
+	bool enableTracing;
+	bool cosimEnable;
 };
 
 struct Breakpoint
@@ -82,7 +76,7 @@ struct Breakpoint
 	struct Breakpoint *next;
 	uint32_t address;
 	uint32_t originalInstruction;
-	int restart;
+	bool restart;
 };
 
 static void doHalt(Core *core);
@@ -91,7 +85,7 @@ static void setScalarReg(Thread *thread, uint32_t reg, uint32_t value);
 static void setVectorReg(Thread *thread, uint32_t reg, uint32_t mask, 
 	uint32_t values[NUM_VECTOR_LANES]);
 static void invalidateSyncAddress(Core *core, uint32_t address);
-static void memoryAccessFault(Thread *thread, uint32_t address, uint32_t isLoad);
+static void memoryAccessFault(Thread *thread, uint32_t address, bool isLoad, FaultReason);
 static void illegalInstruction(Thread *thread, uint32_t instr);
 static void writeMemBlock(Thread *thread, uint32_t address, uint32_t mask, 
 	const uint32_t values[NUM_VECTOR_LANES]);
@@ -100,7 +94,7 @@ static void writeMemShort(Thread *thread, uint32_t address, uint32_t value);
 static void writeMemByte(Thread *thread, uint32_t address, uint32_t value);
 static uint32_t readMemoryWord(const Thread *thread, uint32_t address);
 static uint32_t scalarArithmeticOp(ArithmeticOp operation, uint32_t value1, uint32_t value2);
-static int isCompareOp(uint32_t op);
+static bool isCompareOp(uint32_t op);
 static struct Breakpoint *lookupBreakpoint(Core *core, uint32_t pc);
 static void executeRegisterArithInst(Thread *thread, uint32_t instr);
 static void executeImmediateArithInst(Thread *thread, uint32_t instr);
@@ -111,7 +105,7 @@ static void executeMemoryAccessInst(Thread *thread, uint32_t instr);
 static void executeBranchInst(Thread *thread, uint32_t instr);
 static int executeInstruction(Thread *thread);
 
-Core *initCore(uint32_t memorySize, uint32_t totalThreads, uint32_t randomizeMemory)
+Core *initCore(uint32_t memorySize, uint32_t totalThreads, bool randomizeMemory)
 {
 	uint32_t address;
 	uint32_t threadid;
@@ -123,6 +117,12 @@ Core *initCore(uint32_t memorySize, uint32_t totalThreads, uint32_t randomizeMem
 	core = (Core*) calloc(sizeof(Core), 1);
 	core->memorySize = memorySize;
 	core->memory = (uint32_t*) malloc(memorySize);
+	if (core->memory == NULL)
+	{
+		fprintf(stderr, "Could not allocate memory\n");
+		return NULL;
+	}
+	
 	if (randomizeMemory)
 	{
 		srand((unsigned int) time(NULL));
@@ -142,11 +142,9 @@ Core *initCore(uint32_t memorySize, uint32_t totalThreads, uint32_t randomizeMem
 		core->threads[threadid].linkedAddress = INVALID_LINK_ADDR;
 	}
 
-	// XXX this is currently different than hardware, where the main
-	// thread on each core starts automatically
 	core->threadEnableMask = 1;
-	core->halt = 0;
-	core->enableTracing = 0;
+	core->halt = false;
+	core->enableTracing = false;
 	core->faultHandlerPc = 0;
 
 	return core;
@@ -154,7 +152,7 @@ Core *initCore(uint32_t memorySize, uint32_t totalThreads, uint32_t randomizeMem
 
 void enableTracing(Core *core)
 {
-	core->enableTracing = 1;
+	core->enableTracing = true;
 }
 
 int loadHexFile(Core *core, const char *filename)
@@ -175,7 +173,7 @@ int loadHexFile(Core *core, const char *filename)
 		*memptr++ = endianSwap32((uint32_t) strtoul(line, NULL, 16));
 		if ((uint32_t)((memptr - core->memory) * 4) >= core->memorySize)
 		{
-			fprintf(stderr, "hex file too bit to fit in memory\n");
+			fprintf(stderr, "hex file too big to fit in memory\n");
 			return -1;
 		}
 	}
@@ -206,7 +204,7 @@ void writeMemoryToFile(const Core *core, const char *filename, uint32_t baseAddr
 	fclose(file);
 }
 
-void *getCoreFb(Core *core)
+void *getFramebuffer(Core *core)
 {
 	return ((uint8_t*) core->memory) + 0x200000;
 }
@@ -218,7 +216,7 @@ void printRegisters(const Core *core, uint32_t threadId)
 	const Thread *thread = &core->threads[threadId];
 	
 	printf("REGISTERS\n");
-	for (reg = 0; reg < 31; reg++)
+	for (reg = 0; reg < NUM_REGISTERS - 1; reg++)
 	{
 		if (reg < 10)
 			printf(" ");
@@ -229,7 +227,7 @@ void printRegisters(const Core *core, uint32_t threadId)
 	}
 
 	printf("s31 %08x\n\n", thread->currentPc - 4);
-	for (reg = 0; reg < 32; reg++)
+	for (reg = 0; reg < NUM_REGISTERS; reg++)
 	{
 		if (reg < 10)
 			printf(" ");
@@ -242,7 +240,7 @@ void printRegisters(const Core *core, uint32_t threadId)
 	}
 }
 
-void enableCosimulation(Core *core, uint32_t enable)
+void enableCosimulation(Core *core, bool enable)
 {
 	core->cosimEnable = enable;
 }
@@ -254,8 +252,8 @@ void cosimInterrupt(Core *core, uint32_t threadId, uint32_t pc)
 	thread->lastFaultPc = pc;
 	thread->currentPc = thread->core->faultHandlerPc;
 	thread->lastFaultReason = FR_INTERRUPT;
-	thread->interruptEnable = 0;
-	thread->multiCycleTransferActive = 0;
+	thread->interruptEnable = false;
+	thread->multiCycleTransferActive = false;
 }
 
 uint32_t getTotalThreads(const Core *core)
@@ -263,18 +261,18 @@ uint32_t getTotalThreads(const Core *core)
 	return core->totalThreads;
 }
 
-int coreHalted(const Core *core)
+bool coreHalted(const Core *core)
 {
 	return core->threadEnableMask == 0;
 }
 
-uint32_t executeInstructions(Core *core, uint32_t threadId, uint32_t instructions)
+uint32_t executeInstructions(Core *core, uint32_t threadId, uint32_t totalInstructions)
 {
-	uint32_t i;
+	uint32_t instructionCount;
 	uint32_t thread;
 	
-	core->singleStepping = 0;
-	for (i = 0; i < instructions; i++)
+	core->singleStepping = false;
+	for (instructionCount = 0; instructionCount < totalInstructions; instructionCount++)
 	{
 		if (core->threadEnableMask == 0)
 		{
@@ -309,7 +307,7 @@ uint32_t executeInstructions(Core *core, uint32_t threadId, uint32_t instruction
 
 void singleStep(Core *core, uint32_t threadId)
 {
-	core->singleStepping = 1;
+	core->singleStepping = true;
 	executeInstruction(&core->threads[threadId]);	
 }
 
@@ -318,14 +316,14 @@ uint32_t getPc(const Core *core, uint32_t threadId)
 	return core->threads[threadId].currentPc;
 }
 
-uint32_t getScalarRegister(const Core *core, uint32_t threadId, uint32_t index)
+uint32_t getScalarRegister(const Core *core, uint32_t threadId, uint32_t regId)
 {
-	return getThreadScalarReg(&core->threads[threadId], index);
+	return getThreadScalarReg(&core->threads[threadId], regId);
 }
 
-uint32_t getVectorRegister(const Core *core, uint32_t threadId, uint32_t index, uint32_t lane)
+uint32_t getVectorRegister(const Core *core, uint32_t threadId, uint32_t regId, uint32_t lane)
 {
-	return core->threads[threadId].vectorReg[index][lane];
+	return core->threads[threadId].vectorReg[regId][lane];
 }
 
 uint32_t readMemoryByte(const Core *core, uint32_t address)
@@ -387,14 +385,14 @@ void forEachBreakpoint(const Core *core, void (*callback)(uint32_t pc))
 		callback(breakpoint->address);
 }
 
-void setStopOnFault(Core *core, uint32_t stopOnFault)
+void setStopOnFault(Core *core, bool stopOnFault)
 {
 	core->stopOnFault = stopOnFault;
 }
 
 static void doHalt(Core *core)
 {
-	core->halt = 1;
+	core->halt = true;
 }
 
 static uint32_t getThreadScalarReg(const Thread *thread, uint32_t reg)
@@ -449,7 +447,7 @@ static void invalidateSyncAddress(Core *core, uint32_t address)
 	
 	for (threadId = 0; threadId < core->totalThreads; threadId++)
 	{
-		if (core->threads[threadId].linkedAddress == address / 64)
+		if (core->threads[threadId].linkedAddress == address / CACHE_LINE_LENGTH)
 		{
 			// Invalidate
 			core->threads[threadId].linkedAddress = INVALID_LINK_ADDR;
@@ -457,7 +455,7 @@ static void invalidateSyncAddress(Core *core, uint32_t address)
 	}
 }
 
-static void memoryAccessFault(Thread *thread, uint32_t address, uint32_t isLoad)
+static void memoryAccessFault(Thread *thread, uint32_t address, bool isLoad, FaultReason reason)
 {
 	if (thread->core->stopOnFault)
 	{
@@ -465,15 +463,19 @@ static void memoryAccessFault(Thread *thread, uint32_t address, uint32_t isLoad)
 			isLoad ? "load" : "store",
 			thread->id, thread->currentPc - 4, address);
 		printRegisters(thread->core, thread->id);
-		thread->core->halt = 1;
+		thread->core->halt = true;
 	}
 	else
 	{
 		// Allow core to dispatch
-		thread->lastFaultPc = thread->currentPc - 4;
+		if (reason == FR_IFETCH_FAULT)
+			thread->lastFaultPc = thread->currentPc;
+		else
+			thread->lastFaultPc = thread->currentPc - 4;
+			
 		thread->currentPc = thread->core->faultHandlerPc;
-		thread->lastFaultReason = FR_INVALID_ACCESS;
-		thread->interruptEnable = 0;
+		thread->lastFaultReason = reason;
+		thread->interruptEnable = false;
 		thread->lastFaultAddress = address;
 	}
 }
@@ -482,10 +484,10 @@ static void illegalInstruction(Thread *thread, uint32_t instr)
 {
 	if (thread->core->stopOnFault)
 	{
-		printf("Illegal instruction %08x thread %d PC %08x\n", instr, thread->id, thread->currentPc 
-			- 4);
+		printf("Illegal instruction %08x thread %d PC %08x\n", instr, thread->id, 
+			thread->currentPc - 4);
 		printRegisters(thread->core, thread->id);
-		thread->core->halt = 1;
+		thread->core->halt = true;
 	}
 	else
 	{
@@ -493,7 +495,7 @@ static void illegalInstruction(Thread *thread, uint32_t instr)
 		thread->lastFaultPc = thread->currentPc - 4;
 		thread->currentPc = thread->core->faultHandlerPc;
 		thread->lastFaultReason = FR_ILLEGAL_INSTRUCTION;
-		thread->interruptEnable = 0;
+		thread->interruptEnable = false;
 	}
 }
 
@@ -526,10 +528,25 @@ static void writeMemBlock(Thread *thread, uint32_t address, uint32_t mask,
 
 static void writeMemWord(Thread *thread, uint32_t address, uint32_t value)
 {
-	if ((address & 0xFFFF0000) == 0xFFFF0000)
+	if ((address & 0xffff0000) == 0xffff0000)
 	{
 		// IO address range
-		writeDeviceRegister(address & 0xffff, value);
+		if (address == 0xffff0060)
+		{
+			// Thread resume
+			thread->core->threadEnableMask |= value
+				& ((1ull << thread->core->totalThreads) - 1);
+		}
+		else if (address == 0xffff0064)
+		{
+			// Thread halt
+			thread->core->threadEnableMask &= ~value;
+			if (thread->core->threadEnableMask == 0)
+				doHalt(thread->core);
+		}
+		else
+			writeDeviceRegister(address & 0xffff, value);
+
 		return;
 	}
 
@@ -585,7 +602,7 @@ static uint32_t readMemoryWord(const Thread *thread, uint32_t address)
 	{
 		printf("Load Access Violation %08x, pc %08x\n", address, thread->currentPc - 4);
 		printRegisters(thread->core, thread->id);
-		thread->core->halt = 1;	// XXX Perhaps should stop some other way...
+		thread->core->halt = true;	// XXX Perhaps should stop some other way...
 		return 0;
 	}
 
@@ -647,7 +664,7 @@ static uint32_t scalarArithmeticOp(ArithmeticOp operation, uint32_t value1, uint
 	}
 }
 
-static int isCompareOp(uint32_t op)
+static bool isCompareOp(uint32_t op)
 {
 	return (op >= OP_CMPEQ_I && op <= OP_CMPLE_U) || (op >= OP_CMPGT_F && op <= OP_CMPNE_F);
 }
@@ -680,8 +697,8 @@ static void executeRegisterArithInst(Thread *thread, uint32_t instr)
 	if (op == OP_GETLANE)
 	{
 		// getlane
-		setScalarReg(thread, destreg, thread->vectorReg[op1reg][NUM_VECTOR_LANES - 1 - (getThreadScalarReg(
-			thread, op2reg) & 0xf)]);
+		setScalarReg(thread, destreg, thread->vectorReg[op1reg][NUM_VECTOR_LANES - 1 
+			- (getThreadScalarReg(thread, op2reg) & 0xf)]);
 	}
 	else if (isCompareOp(op))
 	{
@@ -689,8 +706,8 @@ static void executeRegisterArithInst(Thread *thread, uint32_t instr)
 		switch (fmt)
 		{
 			case FMT_RA_SS:
-				result = scalarArithmeticOp(op, getThreadScalarReg(thread, op1reg), getThreadScalarReg(thread, 
-					op2reg)) ? 0xffff : 0;
+				result = scalarArithmeticOp(op, getThreadScalarReg(thread, op1reg),
+					getThreadScalarReg(thread, op2reg)) ? 0xffff : 0;
 				break;
 
 			case FMT_RA_VS:
@@ -727,7 +744,6 @@ static void executeRegisterArithInst(Thread *thread, uint32_t instr)
 				break;
 
 			default:
-
 				illegalInstruction(thread, instr);
 				return;
 		}
@@ -804,7 +820,7 @@ static void executeImmediateArithInst(Thread *thread, uint32_t instr)
 	uint32_t op1reg = extractUnsignedBits(instr, 0, 5);
 	uint32_t maskreg = extractUnsignedBits(instr, 10, 5);
 	uint32_t destreg = extractUnsignedBits(instr, 5, 5);
-	uint32_t hasMask = fmt == 2 || fmt == 3 || fmt == 5 || fmt == 6;
+	uint32_t hasMask = fmt == FMT_IMM_VV_M || fmt == FMT_IMM_VS_M;
 	int lane;
 
 	LOG_INST_TYPE(STAT_IMM_ARITH_INST);
@@ -843,14 +859,11 @@ static void executeImmediateArithInst(Thread *thread, uint32_t instr)
 			case FMT_IMM_SS:
 			case FMT_IMM_VS:
 			case FMT_IMM_VS_M:
-
 				result = scalarArithmeticOp(op, getThreadScalarReg(thread, op1reg),
 					immValue) ? 0xffff : 0;
-
 				break;
 
 			default:
-
 				illegalInstruction(thread, instr);
 				return;
 		}
@@ -908,28 +921,31 @@ static void executeScalarLoadStoreInst(Thread *thread, uint32_t instr)
 	uint32_t ptrreg = extractUnsignedBits(instr, 0, 5);
 	uint32_t offset = extractSignedBits(instr, 10, 15);
 	uint32_t destsrcreg = extractUnsignedBits(instr, 5, 5);
-	uint32_t isLoad = extractUnsignedBits(instr, 29, 1);
+	bool isLoad = extractUnsignedBits(instr, 29, 1);
 	uint32_t address;
+	int isDeviceAccess;
 
 	address = getThreadScalarReg(thread, ptrreg) + offset;
-	if (address >= thread->core->memorySize && (address & 0xffff0000) != 0xffff0000)
+	isDeviceAccess = (address & 0xffff0000) == 0xffff0000;
+	if ((address >= thread->core->memorySize && !isDeviceAccess)
+		|| (isDeviceAccess && op != MEM_LONG))
 	{
 		printf("%s Access Violation %08x, pc %08x\n", isLoad ? "Load" : "Store",
 			address, thread->currentPc - 4);
 		printRegisters(thread->core, thread->id);
-		thread->core->halt = 1;	// XXX Perhaps should stop some other way...
+		thread->core->halt = true;	// XXX Perhaps should stop some other way...
 		return;
 	}
 
 	// Check for address alignment
-	switch( op ) 
+	switch (op) 
 	{
 		// Short
 		case MEM_SHORT:
 		case MEM_SHORT_EXT:
 			if ((address & 1) != 0)
 			{
-				memoryAccessFault(thread, address, isLoad);
+				memoryAccessFault(thread, address, isLoad, FR_INVALID_ACCESS);
 				return;
 			}
 			break;
@@ -939,13 +955,13 @@ static void executeScalarLoadStoreInst(Thread *thread, uint32_t instr)
 		case MEM_SYNC:
 			if ((address & 3) != 0)
 			{
-				memoryAccessFault(thread, address, isLoad);
+				memoryAccessFault(thread, address, isLoad, FR_INVALID_ACCESS);
 				return;
 			}
 			break;
 
 		default:
-		break;
+			break;
 	}
 
 	if (isLoad)
@@ -975,7 +991,7 @@ static void executeScalarLoadStoreInst(Thread *thread, uint32_t instr)
 
 			case MEM_SYNC:
 				value = readMemoryWord(thread, address);
-				thread->linkedAddress = address / 64;
+				thread->linkedAddress = address / CACHE_LINE_LENGTH;
 				break;
 				
 			case MEM_CONTROL_REG:
@@ -1011,7 +1027,7 @@ static void executeScalarLoadStoreInst(Thread *thread, uint32_t instr)
 				break;
 
 			case MEM_SYNC:
-				if (address / 64 == thread->linkedAddress)
+				if (address / CACHE_LINE_LENGTH == thread->linkedAddress)
 				{
 					// Success
 					thread->scalarReg[destsrcreg] = 1;	// HACK: cosim assumes one side effect per inst.
@@ -1038,12 +1054,12 @@ static void executeVectorLoadStoreInst(Thread *thread, uint32_t instr)
 	uint32_t ptrreg = extractUnsignedBits(instr, 0, 5);
 	uint32_t maskreg = extractUnsignedBits(instr, 10, 5);
 	uint32_t destsrcreg = extractUnsignedBits(instr, 5, 5);
-	uint32_t isLoad = extractUnsignedBits(instr, 29, 1);
+	bool isLoad = extractUnsignedBits(instr, 29, 1);
 	uint32_t offset;
 	uint32_t lane;
 	uint32_t mask;
 	uint32_t address;
-	uint32_t result[16];
+	uint32_t result[NUM_VECTOR_LANES];
 
 	LOG_INST_TYPE(STAT_VECTOR_INST);
 
@@ -1080,13 +1096,13 @@ static void executeVectorLoadStoreInst(Thread *thread, uint32_t instr)
 				printf("%s Access Violation %08x, pc %08x\n", isLoad ? "Load" : "Store",
 					address, thread->currentPc - 4);
 				printRegisters(thread->core, thread->id);
-				thread->core->halt = 1;	// XXX Perhaps should stop some other way...
+				thread->core->halt = true;	// XXX Perhaps should stop some other way...
 				return;
 			}
 
-			if ((address & 63) != 0)
+			if ((address & (NUM_VECTOR_LANES * 4 - 1)) != 0)
 			{
-				memoryAccessFault(thread, address, isLoad);
+				memoryAccessFault(thread, address, isLoad, FR_INVALID_ACCESS);
 				return;
 			}
 
@@ -1107,7 +1123,7 @@ static void executeVectorLoadStoreInst(Thread *thread, uint32_t instr)
 			// Multi-cycle vector access.
 			if (!thread->multiCycleTransferActive)
 			{
-				thread->multiCycleTransferActive = 1;
+				thread->multiCycleTransferActive = true;
 				thread->multiCycleTransferLane = NUM_VECTOR_LANES - 1;
 			}
 			else
@@ -1124,20 +1140,20 @@ static void executeVectorLoadStoreInst(Thread *thread, uint32_t instr)
 				printf("%s Access Violation %08x, pc %08x\n", isLoad ? "Load" : "Store",
 					address, thread->currentPc - 4);
 				printRegisters(thread->core, thread->id);
-				thread->core->halt = 1;	// XXX Perhaps should stop some other way...
+				thread->core->halt = true;	// XXX Perhaps should stop some other way...
 				return;
 			}
 
 			if ((mask & (1 << lane)) && (address & 3) != 0)
 			{
-				memoryAccessFault(thread, address, isLoad);
+				memoryAccessFault(thread, address, isLoad, FR_INVALID_ACCESS);
 				return;
 			}
 
 			if (isLoad)
 			{
 				uint32_t values[NUM_VECTOR_LANES];
-				memset(values, 0, 16 * sizeof(uint32_t));
+				memset(values, 0, NUM_VECTOR_LANES * sizeof(uint32_t));
 				if (mask & (1 << lane))
 					values[lane] = readMemoryWord(thread, address);
 
@@ -1188,10 +1204,6 @@ static void executeControlRegisterInst(Thread *thread, uint32_t instr)
 				value = thread->lastFaultAddress;
 				break;
 				
-			case CR_THREAD_ENABLE:
-				value = thread->core->threadEnableMask;
-				break;
-				
 			case CR_CYCLE_COUNT:
 				value = (uint32_t) (__total_instructions & 0xffffffff);
 				break;
@@ -1211,25 +1223,6 @@ static void executeControlRegisterInst(Thread *thread, uint32_t instr)
 				
 			case CR_INTERRUPT_ENABLE:
 				thread->interruptEnable = value;;
-				break;
-			
-			case CR_HALT_THREAD:
-				thread->core->threadEnableMask &= ~(1 << thread->id);
-				if (thread->core->threadEnableMask == 0)
-					doHalt(thread->core);
-
-				break;
-		
-			case CR_THREAD_ENABLE:
-				thread->core->threadEnableMask = getThreadScalarReg(thread, dstSrcReg)
-					& ((1ull << thread->core->totalThreads) - 1);
-				if (thread->core->threadEnableMask == 0)
-					doHalt(thread->core);
-					
-				break;
-				
-			case CR_HALT:
-				doHalt(thread->core);
 				break;
 		}
 	}
@@ -1256,7 +1249,7 @@ static void executeMemoryAccessInst(Thread *thread, uint32_t instr)
 
 static void executeBranchInst(Thread *thread, uint32_t instr)
 {
-	int branchTaken = 0;
+	bool branchTaken = false;
 	uint32_t srcReg = extractUnsignedBits(instr, 0, 5);
 
 	LOG_INST_TYPE(STAT_BRANCH_INST);
@@ -1275,11 +1268,11 @@ static void executeBranchInst(Thread *thread, uint32_t instr)
 			break;
 
 		case BRANCH_ALWAYS:
-			branchTaken = 1;
+			branchTaken = true;
 			break;
 			
 		case BRANCH_CALL_OFFSET:
-			branchTaken = 1;
+			branchTaken = true;
 			setScalarReg(thread, LINK_REG, thread->currentPc);
 			break;
 			
@@ -1304,6 +1297,9 @@ static void executeBranchInst(Thread *thread, uint32_t instr)
 static int executeInstruction(Thread *thread)
 {
 	uint32_t instr;
+	
+	if ((thread->currentPc & 3) != 0)
+		memoryAccessFault(thread, thread->currentPc, true, FR_IFETCH_FAULT);
 
 	instr = readMemoryWord(thread, thread->currentPc);
 	thread->currentPc += 4;
@@ -1326,7 +1322,7 @@ restart:
 		
 			if (breakpoint->restart || thread->core->singleStepping)
 			{
-				breakpoint->restart = 0;
+				breakpoint->restart = false;
 				instr = breakpoint->originalInstruction;
 				assert(instr != BREAKPOINT_OP);
 				goto restart;
@@ -1334,7 +1330,7 @@ restart:
 			else
 			{
 				// Hit a breakpoint
-				breakpoint->restart = 1;
+				breakpoint->restart = true;
 				return 0;
 			}
 		}

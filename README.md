@@ -1,42 +1,42 @@
 # Nyuzi Processor
+[![Build Status](https://travis-ci.org/jbush001/NyuziProcessor.svg?branch=master)](https://travis-ci.org/jbush001/NyuziProcessor)
+[![Chat at https://gitter.im/jbush001/NyuziProcessor](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/jbush001/NyuziProcessor?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
 Nyuzi is an experimental multicore GPGPU processor. It supports vector floating
-point, hardware multithreading, and cache coherence. The SystemVerilog-based 
-hardware implementation is synthesizable and runs on FPGA. This project also 
-includes an LLVM-based C++ toolchain, a symbolic debugger, an emulator, software 
-libraries, and hardware verification tests. It is useful for microarchitecture 
-experimentation, performance modeling, and parallel software development.
+point, hardware multithreading, and cache coherence. The SystemVerilog-based
+hardware implementation is synthesizable and runs on FPGA. This project also
+includes an LLVM-based C++ toolchain, tests, and many other tools. It is useful
+for microarchitecture experimentation, performance modeling, and parallel
+software development.
 
-I've attempted to make this easy to set up and highly hackable. It uses free and
-mostly open source tools. Contributions are welcome, please see 
+I have attempted to make this easy to set up and hack on. It uses free
+and mostly open source tools. Contributions are welcome, please see 
 [CONTRIBUTING](CONTRIBUTING.md) for more details.
 
 **Documentation:** https://github.com/jbush001/NyuziProcessor/wiki  
 **Mailing list:** https://groups.google.com/forum/#!forum/nyuzi-processor-dev   
 **License:** Apache 2.0    
 **Blog:** http://latchup.blogspot.com/   
-[![Chat at https://gitter.im/jbush001/NyuziProcessor](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/jbush001/NyuziProcessor?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+
 
 # Getting Started
 
-The following instructions explain how to get the Nyuzi development environment
-set up. This allows cycle-accurate simulation of the hardware and software 
-development using the emulator. It does not require an FPGA.
+The following instructions explain how to set up the Nyuzi development
+environment, including the emulator and cycle-accurate hardware simulator. This
+allows both hardware and software development without an FPGA. These
+instructions assume you have cloned this repo on your local machine and have a
+shell open in the top directory.
 
-If you have issues, feel free to send a message to the mailing list or Gitter 
-(links above).
-
-These instructions assume you have cloned this repo locally and have a shell open 
-in the top directory.
+If you have problems getting this running, feel free to send a message to the
+mailing list or Gitter (links above).
 
 ## Install Prerequisites
-
 
 ### Linux (Ubuntu)
 
 This requires Ubuntu 14 or later to get the proper package versions. It should
-work for other distributions, but you will probably need to modify some 
-package names.
+work for other distributions, but you will probably need to change some package
+names.
 
 	sudo apt-get -y install cmake make gcc g++ bison flex python perl emacs curl openjdk-7-jdk swig zlib1g-dev python-dev libxml2-dev libedit-dev ncurses-dev libsdl2-dev gtkwave imagemagick 
 
@@ -45,28 +45,29 @@ The makefile executes this operation in batch mode*
 
 ### MacOS
 
-These instructions assume Mavericks or later.  If you don't have XCode
-already, install the command line tools like this:
+These instructions assume Mavericks or later. If you don't have XCode, install
+the command line tools like this:
 
     xcode-select --install
 
-This installs the remaining packages using [MacPorts](https://www.macports.org/):
+The next command installs the remaining packages, assuming you've installed 
+[MacPorts](https://www.macports.org/install.php):
 
     sudo port install cmake bison swig swig-python imagemagick libsdl2 curl emacs
 
-You may optionally also want to install [GTKWave](http://gtkwave.sourceforge.net/) 
-for analyzing waveform files.
+You may optionally install [GTKWave](http://gtkwave.sourceforge.net/) for analyzing 
+waveform files.
 
 ### Windows
 
-I have not tested this on Windows. Many of the libraries are already cross
-platform, so it should theoretically be possible. The easiest route is probably
-to run Linux under VirtualBox or VMWare.
+I have not tested this on Windows. Many of the libraries are cross platform, so
+it should be possible to port it. But the easiest route is probably to run
+Linux under a virtual machine like [VirtualBox](https://www.virtualbox.org/wiki/Downloads).
 
 ## Build (Linux & MacOS)
 
-Download and build Verilator as follows (while some Linux package managers have
-this, it is way out of date):
+Download and build Verilator as follows (although some Linux package managers have
+it, it is out of date):
 
     cd tools
     curl http://www.veripool.org/ftp/verilator-3.876.tgz | tar xz
@@ -95,10 +96,9 @@ Build remaining tools and hardware model. Run unit tests.
 
 ## What next?
 
-Various sample applications are available in [software/apps](software/apps).
-These can be run in the emulator by typing 'make run' (some may require
-downloading 3rd party data files, details are in the READMEs in those
-directories). 
+Sample applications are available in [software/apps](software/apps). You can 
+run these in the emulator by typing 'make run' (some need 3rd party data
+files, details are in the READMEs in those directories).
 
 For example, this will render a 3D model:
 

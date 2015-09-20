@@ -19,8 +19,8 @@
 
 //
 // Instruction Pipeline - Instruction Fetch Data Stage
-// - If the last fetched PC is in the instruction cache, fetch the contents of
-//   the cache line here.
+// - If the preceding PC that was fetched is in the instruction cache, read 
+//   the contents of the cache line here.
 // - Drive signals to update LRU in previous stage
 //
 
@@ -61,6 +61,7 @@ module ifetch_data_stage(
 	output logic                     ifd_instruction_valid,
 	output scalar_t                  ifd_pc,
 	output thread_idx_t              ifd_thread_idx,
+	output logic                     ifd_ifetch_fault,
                                     
 	// From writeback stage         
 	input                            wb_rollback_en,
@@ -132,6 +133,7 @@ module ifetch_data_stage(
 		begin
 			/*AUTORESET*/
 			// Beginning of autoreset for uninitialized flops
+			ifd_ifetch_fault <= '0;
 			ifd_instruction_valid <= '0;
 			ifd_pc <= '0;
 			ifd_thread_idx <= '0;
@@ -147,6 +149,7 @@ module ifetch_data_stage(
 				!= ift_thread_idx) && cache_hit;
 			ifd_pc <= ift_pc;
 			ifd_thread_idx <= ift_thread_idx;
+			ifd_ifetch_fault <= ift_pc[1:0] != 0;
 		end
 	end
 endmodule

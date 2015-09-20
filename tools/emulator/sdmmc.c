@@ -16,12 +16,14 @@
 
 #include <assert.h>
 #include <fcntl.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "device.h"
 #include "sdmmc.h"
 
 // Read only SD/MMC interface, SPI mode.
@@ -29,21 +31,29 @@
 
 #define INIT_CLOCKS 80
 
-enum SdState
+// Commands
+enum SDCommand
 {
-	kInitWaitForClocks,
-	kIdle,
-	kReceiveCommand,
-	kWaitReadResponse,
-	kSendResult,
-	kDoRead
+	CMD_GO_IDLE = 0x00,
+	CMD_SEND_OP_COND = 0x01,
+	CMD_SET_BLOCKLEN = 0x16,
+	CMD_READ_SINGLE_BLOCK = 0x17
+};
+
+enum SDState
+{
+	STATE_INIT_WAIT,
+	STATE_IDLE,
+	STATE_RECEIVE_COMMAND,
+	STATE_WAIT_READ_RESPONSE,
+	STATE_SEND_RESULT,
+	STATE_DO_READ
 };
 
 static uint8_t *gBlockDevData;
 static uint32_t gBlockDevSize;
 static int gBlockFd = -1;
-
-static enum SdState gCurrentState;
+static enum SDState gCurrentState;
 static uint32_t gChipSelect;
 static uint32_t gStateDelay;
 static uint32_t gReadOffset;
@@ -54,7 +64,7 @@ static uint8_t gCommandResult;
 static uint32_t gResetDelay;
 static uint8_t gCurrentCommand[6];
 static uint32_t gCurrentCommandLength;
-static uint32_t gIsReset;
+static bool gIsReset = false;
 
 int openBlockDevice(const char *filename)
 {
@@ -64,24 +74,24 @@ int openBlockDevice(const char *filename)
 
 	if (stat(filename, &fs) < 0)
 	{
-		perror("stat");
-		return 0;
+		perror("failed to open block device file");
+		return -1;
 	}
 	
 	gBlockDevSize = (uint32_t) fs.st_size;	
 	gBlockFd = open(filename, O_RDONLY);
 	if (gBlockFd < 0)
 	{
-		perror("open");
-		return 0;
+		perror("failed to open block device file");
+		return -1;
 	}
 	
 	gBlockDevData = mmap(NULL, gBlockDevSize, PROT_READ, MAP_SHARED, gBlockFd, 0); 
 	if (gBlockDevData == NULL)
-		return 0;
+		return -1;
 
 	printf("Loaded block device %d bytes\n", gBlockDevSize);
-	return 1;
+	return 0;
 }
 
 void closeBlockDevice()
@@ -99,13 +109,13 @@ static void processCommand(const uint8_t command[6])
 {
 	switch (command[0] & 0x3f)
 	{
-		case 0x00:	// Reset (CMD0)
-			gIsReset = 1;
-			gCurrentState = kSendResult;
+		case CMD_GO_IDLE:
+			gIsReset = true;
+			gCurrentState = STATE_SEND_RESULT;
 			gCommandResult = 1;
 			break;
 		
-		case 0x01:	// Initialize (CMD1)
+		case CMD_SEND_OP_COND:	
 			if (gResetDelay)
 			{
 				gCommandResult = 1;
@@ -114,10 +124,10 @@ static void processCommand(const uint8_t command[6])
 			else
 				gCommandResult = 0;
 			
-			gCurrentState = kSendResult;
+			gCurrentState = STATE_SEND_RESULT;
 			break;
 
-		case 0x16: // Set block length (CMD16)
+		case CMD_SET_BLOCKLEN: 
 			if (!gIsReset)
 			{
 				printf("set block length command issued, card not ready\n");
@@ -125,11 +135,11 @@ static void processCommand(const uint8_t command[6])
 			}
 
 			gBlockLength = convertValue(command + 1);
-			gCurrentState = kSendResult;
+			gCurrentState = STATE_SEND_RESULT;
 			gCommandResult = 0;
 			break;
 			
-		case 0x17: // Read block (CMD17)
+		case CMD_READ_SINGLE_BLOCK: 
 			if (!gIsReset)
 			{
 				printf("set block length command issued, card not ready\n");
@@ -137,7 +147,7 @@ static void processCommand(const uint8_t command[6])
 			}
 
 			gReadOffset = convertValue(command + 1) * gBlockLength;
-			gCurrentState = kWaitReadResponse;
+			gCurrentState = STATE_WAIT_READ_RESPONSE;
 			gStateDelay = rand() & 0xf;	// Wait a random amount of time
 			gResponseValue = 0;	
 			break;
@@ -148,10 +158,10 @@ void writeSdCardRegister(uint32_t address, uint32_t value)
 {
 	switch (address)
 	{
-		case 0x44:	// Write data
+		case REG_SD_WRITE_DATA:
 			switch (gCurrentState)
 			{
-				case kInitWaitForClocks:
+				case STATE_INIT_WAIT:
 					gInitClockCount += 8;
 					if (!gChipSelect && gInitClockCount < INIT_CLOCKS)
 					{
@@ -161,17 +171,17 @@ void writeSdCardRegister(uint32_t address, uint32_t value)
 				
 					// Falls through
 					
-				case kIdle:
+				case STATE_IDLE:
 					if (!gChipSelect && (value & 0xc0) == 0x40)
 					{
-						gCurrentState = kReceiveCommand;
+						gCurrentState = STATE_RECEIVE_COMMAND;
 						gCurrentCommand[0] = value & 0xff;
 						gCurrentCommandLength = 1;
 					}
 
 					break;
 					
-				case kReceiveCommand:
+				case STATE_RECEIVE_COMMAND:
 					if (!gChipSelect)
 					{
 						gCurrentCommand[gCurrentCommandLength++] = value & 0xff;
@@ -184,15 +194,15 @@ void writeSdCardRegister(uint32_t address, uint32_t value)
 
 					break;
 					
-				case kSendResult:
+				case STATE_SEND_RESULT:
 					gResponseValue = gCommandResult;
-					gCurrentState = kIdle;
+					gCurrentState = STATE_IDLE;
 					break;
 					
-				case kWaitReadResponse:
+				case STATE_WAIT_READ_RESPONSE:
 					if (gStateDelay == 0)
 					{
-						gCurrentState = kDoRead;
+						gCurrentState = STATE_DO_READ;
 						gResponseValue = 0;	// Signal ready
 						gStateDelay = gBlockLength + 2;
 					}
@@ -204,7 +214,7 @@ void writeSdCardRegister(uint32_t address, uint32_t value)
 					
 					break;
 
-				case kDoRead:
+				case STATE_DO_READ:
 					// Ignore transmitted byte, put read byte in buffer
 					if (--gStateDelay < 2)
 						gResponseValue = 0xff;	// Checksum
@@ -212,14 +222,14 @@ void writeSdCardRegister(uint32_t address, uint32_t value)
 						gResponseValue = gBlockDevData[gReadOffset++];
 
 					if (gStateDelay == 0)
-						gCurrentState = kIdle;
+						gCurrentState = STATE_IDLE;
 						
 					break;
 			}
 			
 			break;
 
-		case 0x50:	// control
+		case REG_SD_CONTROL:
 			gChipSelect = value & 1;
 			break;
 			
@@ -232,10 +242,10 @@ unsigned readSdCardRegister(uint32_t address)
 {
 	switch (address)
 	{
-		case 0x48: // read data
+		case REG_SD_READ_DATA:
 			return gResponseValue;
 	
-		case 0x4c: // status
+		case REG_SD_STATUS: 
 			return 0x01;
 	
 		default:

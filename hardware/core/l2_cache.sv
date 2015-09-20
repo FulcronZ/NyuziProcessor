@@ -18,28 +18,26 @@
 `include "defines.sv"
 
 //
-// L2 cache. If there is a cache miss, it is put into a queue to be filled. When 
-// it has been satisified, the original packet is fed back into the L2 cache
-// pipeline.
-// The L2 cache is pipelined and has 4 stages:
-//  - Arbitrate: chooses between requests from cores, or a restarted request
-//    that has been filled from system memory.  Restarted requests always
-//    take precedence to avoid deadlock.
+// L2 cache. If there is a cache miss, this puts the request into a queue and 
+// fills it from system memory. When it completes the fill, it feeds the 
+// request back into the L2 cache pipeline.
+// The L2 cache has a four stage pipeline:
+//  - Arbitrate: chooses among requests from cores, or a restarted request
+//    filled from system memory.  Restarted requests always take precedence to 
+//    avoid deadlock.
 //  - Tag: issues address to tag ram ways, checks LRU.
 //  - Read: checks for cache hit, reads cache memory
 //  - Update: generates signals to update cache memory and sends response packet
 //
 
 module l2_cache(
-	input                        clk,
-	input                        reset,
-	input l2req_packet_t         l2i_request[`NUM_CORES],
-	output                       l2_ready[`NUM_CORES],
-	output l2rsp_packet_t        l2_response,
-	axi4_interface.master        axi_bus,
-	output logic                 perf_l2_miss,
-	output logic                 perf_l2_hit,
-	output logic                 perf_l2_writeback);
+	input                                 clk,
+	input                                 reset,
+	input l2req_packet_t                  l2i_request[`NUM_CORES],
+	output                                l2_ready[`NUM_CORES],
+	output l2rsp_packet_t                 l2_response,
+	axi4_interface.master                 axi_bus,
+	output logic[`L2_PERF_EVENTS - 1:0]   l2_perf_events);
 
 	/*AUTOWIRE*/
 	// Beginning of automatic wires (for undeclared instantiated-module outputs)
@@ -77,6 +75,9 @@ module l2_cache(
 	wire [$clog2(`L2_WAYS*`L2_SETS)-1:0] l2u_write_addr;// From l2_cache_update of l2_cache_update.v
 	cache_line_data_t l2u_write_data;	// From l2_cache_update of l2_cache_update.v
 	logic		l2u_write_en;		// From l2_cache_update of l2_cache_update.v
+	logic		perf_l2_hit;		// From l2_cache_read of l2_cache_read.v
+	logic		perf_l2_miss;		// From l2_cache_read of l2_cache_read.v
+	logic		perf_l2_writeback;	// From l2_axi_bus_interface of l2_axi_bus_interface.v
 	// End of automatics
 	l2req_packet_t l2bi_request;
 	cache_line_data_t l2bi_data_from_memory;
@@ -87,6 +88,12 @@ module l2_cache(
 	l2_cache_update l2_cache_update(.*);
 
 	l2_axi_bus_interface l2_axi_bus_interface(.*);
+
+	assign l2_perf_events = {
+		perf_l2_hit,
+		perf_l2_miss,
+		perf_l2_writeback
+	};
 endmodule
 
 // Local Variables:

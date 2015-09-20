@@ -41,23 +41,16 @@ module nyuzi
 	l2req_packet_t l2i_request[`NUM_CORES];
 	l2rsp_packet_t l2_response;
 	logic l2_ready[`NUM_CORES];
-	logic[`NUM_CORES - 1:0] core_halt;
 	ioreq_packet_t io_request[`NUM_CORES];
 	logic ia_ready[`NUM_CORES];
 	iorsp_packet_t ia_response;
-	logic[`NUM_CORES - 1:0] perf_dcache_hit;
-	logic[`NUM_CORES - 1:0] perf_dcache_miss;
-	logic[`NUM_CORES - 1:0] perf_icache_hit;
-	logic[`NUM_CORES - 1:0] perf_icache_miss;
-	logic[`NUM_CORES - 1:0] perf_instruction_issue;
-	logic[`NUM_CORES - 1:0] perf_instruction_retire;
-	logic[`NUM_CORES - 1:0] perf_store_count;
-	logic[`NUM_CORES - 1:0] perf_store_rollback;
 	logic perf_l2_hit;		
 	logic perf_l2_miss;		
 	logic perf_l2_writeback;	
+	logic[`TOTAL_THREADS - 1:0] ny_thread_enable;
+	logic[`TOTAL_PERF_EVENTS - 1:0] perf_events;
 
-	assign processor_halt = |core_halt;
+	assign processor_halt = ny_thread_enable == 0;
 
 	genvar core_idx;
 	generate
@@ -66,41 +59,37 @@ module nyuzi
 			core #(.CORE_ID(core_id_t'(core_idx)), .RESET_PC(RESET_PC)) core(
 				.l2i_request(l2i_request[core_idx]),
 				.l2_ready(l2_ready[core_idx]),
-				.processor_halt(core_halt[core_idx]),
+				.ny_thread_enable(ny_thread_enable[core_idx * `THREADS_PER_CORE+:`THREADS_PER_CORE]),
 				.ior_request(io_request[core_idx]),
 				.ia_ready(ia_ready[core_idx]),
 				.ia_response(ia_response),
-				.perf_dcache_hit(perf_dcache_hit[core_idx]),
-				.perf_dcache_miss(perf_dcache_miss[core_idx]),
-				.perf_icache_hit(perf_icache_hit[core_idx]),
-				.perf_icache_miss(perf_icache_miss[core_idx]),
-				.perf_instruction_issue(perf_instruction_issue[core_idx]),
-				.perf_instruction_retire(perf_instruction_retire[core_idx]),
-				.perf_store_count(perf_store_count[core_idx]),
-				.perf_store_rollback(perf_store_rollback[core_idx]),
+				.core_perf_events(perf_events[`L2_PERF_EVENTS + `CORE_PERF_EVENTS * core_idx+:`CORE_PERF_EVENTS]),
 				.*);
 		end
 	endgenerate
 	
-	l2_cache l2_cache(.*);
+	always_ff @(posedge clk, posedge reset)
+	begin
+		if (reset)
+			ny_thread_enable <= 1;
+		else if (io_write_en)
+		begin
+			// Thread mask  This is limited to 32 threads.
+			// To add more, put the next 32 bits in subsequent io addresses.
+			if (io_address == 'h60) // resume thread
+				ny_thread_enable <= ny_thread_enable | io_write_data[`TOTAL_THREADS - 1:0];	
+			else if (io_address == 'h64) // halt thread
+				ny_thread_enable <= ny_thread_enable & ~io_write_data[`TOTAL_THREADS - 1:0];	
+		end
+	end
+	
+	l2_cache l2_cache(
+		.l2_perf_events(perf_events[`L2_PERF_EVENTS - 1:0]),
+		.*);
+
 	io_arbiter io_arbiter(.*);
 
-	performance_counters #(.NUM_COUNTERS(3 + 8 * `NUM_CORES)) performance_counters(
-		.perf_event({
-			// Per core events (XXX should combine these)
-			perf_dcache_hit,
-			perf_dcache_miss,
-			perf_icache_hit,
-			perf_icache_miss,
-			perf_instruction_issue,
-			perf_instruction_retire,
-			perf_store_count,
-			perf_store_rollback,
-			
-			// Shared events
-			perf_l2_hit,
-			perf_l2_miss,		
-			perf_l2_writeback}),
+	performance_counters #(.NUM_COUNTERS(`TOTAL_PERF_EVENTS)) performance_counters(
 		.*);
 endmodule
 

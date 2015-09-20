@@ -22,7 +22,7 @@
 // which cache way to load new cache lines into.
 //
 // There are two interfaces that update the LRU. The client must assert 
-// access_en a cycle before updating. This fetches the old LRU value.
+// access_en a cycle before updating to fetch the old LRU value.
 //
 // Fill:
 // The cache asserts fill_en and fill_set when it fills a cache line.
@@ -33,7 +33,7 @@
 // During the first cycle of a cache loads, the client asserts access_en and 
 // access_set. If there was a cache hit, it asserts update_en and update_way 
 // one cycle later to update the accessed way to the MRU position. It is 
-// illegal to assert update_en if access_en was not asserted in the previous 
+// illegal to assert update_en without asserting access_en in the previous 
 // cycle.
 //
 // If the client asserts fill_en and access_en simultaneously, fill wins. This 

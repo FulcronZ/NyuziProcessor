@@ -8,10 +8,8 @@ and put it in this directory.
 
 To run in the emulator, type 'make run'.
 
-To run on FPGA, change libos to use the ramdisk by setting the ENABLE_RAMDISK
-macro in software/libs/libos/fs.c. Rebuild libos and type 'make fpgarun' 
-in this directory to execute. The makefile transfers the data files over the 
-serial port into the ramdisk. This takes a while.
+To run on FPGA, type 'make fpgarun' in this directory. The makefile transfers 
+the data files over the serial port into the ramdisk. This takes a while.
 
 The primary changes I made for the port were:
 
@@ -20,5 +18,5 @@ The primary changes I made for the port were:
 * in i_video.c, read from a virtual keyboard device for input. 
 * W_CheckNumForName assumed support for unaligned accesses. Changed to 
   use memcmp.
-* Code from i_net and i_sound removed, since there's no hardware support 
+* Code from i_net and i_sound removed, as there is no hardware support 
   for them.

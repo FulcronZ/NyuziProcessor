@@ -20,10 +20,11 @@
 //
 // Instruction Pipeline Thread Select Stage
 // - Contains an instruction FIFO for each thread
-// - Each cycle, picks a thread to issue using a round robin scheduling algorithm,
-//   avoid various types of conflicts:
-//   * inter-instruction register dependencies, tracked using a per-thread scoreboard 
-//   * writeback hazards between the pipelines of different lengths
+// - Each cycle, picks a thread to issue using a round robin scheduling 
+//   algorithm, avoid various types of conflicts:
+//   * inter-instruction register dependencies, tracked using a scoreboard
+//     for each thread. 
+//   * writeback hazards among the pipelines of different lengths
 // - Tracks dcache misses and suspends threads until they are resolved.
 //
 
@@ -57,7 +58,7 @@ module thread_select_stage(
 	input subcycle_t                   wb_rollback_subcycle,
 
 	// From control registers
-	input thread_bitmap_t              cr_thread_enable,
+	input thread_bitmap_t              ny_thread_enable,
 	
 	// From dcache data stage
 	input thread_bitmap_t              wb_suspend_thread_oh,
@@ -153,7 +154,7 @@ module thread_select_stage(
 			// This signal goes back to the thread fetch stage to enable fetching more
 			// instructions. We need to deassert fetch enable a few cycles before the FIFO 
 			// fills up becausee there are several stages in-between.
-			assign ts_fetch_en[thread_idx] = !ififo_almost_full && cr_thread_enable[thread_idx];
+			assign ts_fetch_en[thread_idx] = !ififo_almost_full && ny_thread_enable[thread_idx];
 
 			/// XXX PC needs to be treated specially for scoreboard?
 
@@ -282,7 +283,7 @@ module thread_select_stage(
 			// multiple times, this would delay the load.  
 			assign can_issue_thread[thread_idx] = instruction_latched
 				&& ((scoreboard[thread_idx] & scoreboard_dep_bitmap) == 0 || current_subcycle[thread_idx] != 0)
-				&& cr_thread_enable[thread_idx]
+				&& ny_thread_enable[thread_idx]
 				&& !rollback_this_thread
 				&& !writeback_conflict
 				&& !thread_blocked[thread_idx];

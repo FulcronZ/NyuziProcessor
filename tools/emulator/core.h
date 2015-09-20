@@ -18,25 +18,28 @@
 #ifndef __CORE_H
 #define __CORE_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #define NUM_REGISTERS 32
 #define NUM_VECTOR_LANES 16
 #define ALL_THREADS 0xffffffff
+#define CACHE_LINE_LENGTH 64u
+#define CACHE_LINE_MASK (CACHE_LINE_LENGTH - 1)
 
 typedef struct Core Core;
 
-Core *initCore(uint32_t memsize, uint32_t totalThreads, uint32_t randomizeMemory);
+Core *initCore(uint32_t memsize, uint32_t totalThreads, bool randomizeMemory);
 void enableTracing(Core *core);
 int loadHexFile(Core *core, const char *filename);
-void writeMemoryToFile(const Core *core, const char *filename, uint32_t baseAddress, 
+void writeMemoryToFile(const Core*, const char *filename, uint32_t baseAddress, 
 	uint32_t length);
-void *getCoreFb(Core*);
-void printRegisters(const Core *core, uint32_t threadId);
-void enableCosimulation(Core *core, uint32_t enable);
-void cosimInterrupt(Core *core, uint32_t threadId, uint32_t pc);
-uint32_t getTotalThreads(const Core *core);
-int coreHalted(const Core *core);
+void *getFramebuffer(Core*);
+void printRegisters(const Core*, uint32_t threadId);
+void enableCosimulation(Core*, bool enable);
+void cosimInterrupt(Core*, uint32_t threadId, uint32_t pc);
+uint32_t getTotalThreads(const Core*);
+bool coreHalted(const Core*);
 
 //
 // Returns: 
@@ -50,13 +53,13 @@ uint32_t executeInstructions(Core*, uint32_t threadId, uint32_t instructions);
 
 void singleStep(Core*, uint32_t threadId);
 uint32_t getPc(const Core*, uint32_t threadId);
-uint32_t getScalarRegister(const Core*, uint32_t threadId, uint32_t index);
-uint32_t getVectorRegister(const Core*, uint32_t threadId, uint32_t index, uint32_t lane);
+uint32_t getScalarRegister(const Core*, uint32_t threadId, uint32_t regId);
+uint32_t getVectorRegister(const Core*, uint32_t threadId, uint32_t regId, uint32_t lane);
 uint32_t readMemoryByte(const Core*, uint32_t addr);
 void writeMemoryByte(const Core*, uint32_t addr, uint8_t byte);
 void setBreakpoint(Core*, uint32_t pc);
 void clearBreakpoint(Core*, uint32_t pc);
 void forEachBreakpoint(const Core*, void (*callback)(uint32_t pc));
-void setStopOnFault(Core*, uint32_t stopOnFault);
+void setStopOnFault(Core*, bool stopOnFault);
 
 #endif

@@ -1,12 +1,12 @@
 This directory contains the hardware implementation of the processor. There are
 three directories: 
 - core/ 
-  The GPGPU. The top level module is called 'nyuzi'. Configurable options (cache
-  size, associativity, number of cores) are in core/config.sv
+  The GPGPU. The top level module is 'nyuzi'. Configurable options (cache size,
+  associativity, number of cores) are in core/config.sv
 - fpga/ 
   Components of a quick and dirty FPGA system-on-chip test environment. It
   includes an SDRAM controller, VGA controller, AXI interconnect, and other
-  peripherals like a serial port. (Information is
+  peripherals like a serial port. (Documentation is
   [here](https://github.com/jbush001/NyuziProcessor/wiki/FPGA-Test-Environment)). 
   The makefile for the DE2-115 board target is in fpga/de2-115.
 - testbench/ 
@@ -76,6 +76,8 @@ E = emulator, V = verilator.
 | ffff0054 | w | FV | SD clock divider |
 | ffff0058 | w | F | SD GPIO direction<sup>4</sup> |
 | ffff005c | w | F | SD GPIO value |
+| ffff0060 | w | FEV | Thread resume mask. A 1 bit starts a thread. (bit 0 = thread 0) |
+| ffff0064 | w | FEV | Thread halt mask. A 1 bit halts a thread. (bit 0 = thread 0) |
 
 1. Serial writes (including printfs from software) print to standard out in
 Verilator and the emulator.

@@ -3,10 +3,8 @@ It uses the 3D engine in librender. Run it in the emulator by typing:
 
     make run
 
-To run on FPGA, set the ENABLE_RAMDISK macro in libos/fs.c, rebuild, and do a
-clean rebuild in this directory. Once everything is built, type 'make fpgarun'
-to execute. The makefile will transfer the data files over the serial port 
-into a ramdisk in memory. This will take a while.
+To run on FPGA, type 'make fpgarun'. The makefile will transfer the data files 
+over the serial port into a ramdisk in memory. This will take a while.
 
 The makefile invokes the 'make_resource_py.py' script. This reads the OBJ file 
 and associated textures and writes out 'resource.bin', which the viewer program
@@ -44,11 +42,11 @@ representing closer depth values and darker representing farther ones.
 
 ### Running in Verilog Simulation
 
-In order to measure the performance of rendering one frame in simulation, you need to make
-the following changes:
+To measure the performance of rendering one frame in simulation, make the
+following changes:
 
 1. At the bottom of the main loop in sceneview.cpp, add a call to exit(). This stop the main
-loop, and will also cause the worker threads to terminate:
+loop, and will cause the worker threads to stop:
 
          		context->finish();
          		printf("rendered frame in %d instructions\n", __builtin_nyuzi_read_control_reg(6) 
@@ -66,5 +64,5 @@ change MEM_SIZE to 'h3000000 (48 MB)
 
 4. Type make in the hardware directory to rebuild the verilator model
 
-Once you've made these changes, you can run the test by typing 'make verirun'.
+Once you have made these changes, you can run the test by typing 'make verirun'.
 

@@ -26,7 +26,7 @@
 #include "device.h"
 #include "sdmmc.h"
 
-#define KEY_BUFFER_SIZE 32
+#define KEY_BUFFER_SIZE 64
 
 static uint32_t keyBuffer[KEY_BUFFER_SIZE];
 static int keyBufferHead;
@@ -36,12 +36,12 @@ void writeDeviceRegister(uint32_t address, uint32_t value)
 {
 	switch (address)
 	{
-		case  0x20:
+		case REG_SERIAL_OUTPUT:
 			printf("%c", value & 0xff); // Serial output
 			break;
 
-		case 0x44:
-		case 0x50:
+		case REG_SD_WRITE_DATA:
+		case REG_SD_CONTROL:
 			writeSdCardRegister(address, value);
 			break;
 	}
@@ -53,18 +53,16 @@ uint32_t readDeviceRegister(uint32_t address)
 	
 	switch (address)
 	{
-		case 0x18:	// Serial status
+		case REG_SERIAL_STATUS:
 			return 1;
 
-		case 0x38:
-			// Keyboard status
+		case REG_KEYBOARD_STATUS:
 			if (keyBufferHead != keyBufferTail)
 				return 1;
 			else
 				return 0;
 
-		case 0x3c:
-			// Keyboard scancode
+		case REG_KEYBOARD_READ:
 			if (keyBufferHead != keyBufferTail)
 			{
 				value = keyBuffer[keyBufferTail];
@@ -74,19 +72,17 @@ uint32_t readDeviceRegister(uint32_t address)
 				value = 0;
 			
 			return value;
-			
-		case 0x40:
-			// real time clock
-			{
-				struct timeval tv;
-				gettimeofday(&tv, NULL);
-				return (uint32_t)(tv.tv_sec * 1000000 + tv.tv_usec);
-			}
 
-		case 0x48:
-		case 0x4c:
+		case REG_REAL_TIME_CLOCK:
+		{
+			struct timeval tv;
+			gettimeofday(&tv, NULL);
+			return (uint32_t)(tv.tv_sec * 1000000 + tv.tv_usec);
+		}
+
+		case REG_SD_READ_DATA:
+		case REG_SD_STATUS:
 			return readSdCardRegister(address);
-			
 
 		default:
 			return 0xffffffff;

@@ -14,13 +14,16 @@
 // limitations under the License.
 // 
 
-
+#include <schedule.h>
 #include <stdint.h>
+#include <stdio.h>
 
 //
 // This benchmark attempts to roughly simulate the workload of Bitcoin hashing, 
 // although I didn't bother to make it correct and many details are missing.  
 // It runs parallelized double SHA-256 hashes over a sequence of values.
+// Each thread performs 16 hashes in parallel (one per vector lane). With four
+// threads, there are 64 hashes running simultaneously.
 //
 
 // SHA-256 RFC 4634 (ish)
@@ -64,6 +67,9 @@ const unsigned int K[] = {
     0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
     0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5
 };
+
+static volatile int gActiveThreadCount = 0;
+
 
 // Run 16 parallel hashes
 void sha2Hash(vecu16_t pointers, int totalBlocks, vecu16_t outHashes)
@@ -140,7 +146,7 @@ void sha2Hash(vecu16_t pointers, int totalBlocks, vecu16_t outHashes)
 // four times.  The total number of hashes performed is 256.
 int main()
 {
-	__builtin_nyuzi_write_control_reg(30, 0xffffffff);	// Start other threads
+	startAllThreads();
 
 	const int kSourceBlockSize = 128;
 	const int kHashSize = 32;
@@ -154,11 +160,27 @@ int main()
 	vecu16_t tmpPtr = inputPtr + __builtin_nyuzi_makevectori(kSourceBlockSize * kNumLanes);
 	vecu16_t outputPtr = tmpPtr + __builtin_nyuzi_makevectori(kHashSize * kNumLanes);
 
+	__sync_fetch_and_add(&gActiveThreadCount, 1);
+
 	for (int i = 0; i < 4; i++)
 	{
 		// Double sha-2 hash
 		sha2Hash(inputPtr, kSourceBlockSize / kHashSize, outputPtr);
 		sha2Hash(tmpPtr, 1, outputPtr);
+	}
+
+	__sync_fetch_and_add(&gActiveThreadCount, -1);
+	if (__builtin_nyuzi_read_control_reg(0) == 0)
+	{
+		while (gActiveThreadCount > 0)
+			;
+
+		int endTime = __builtin_nyuzi_read_control_reg(6);
+		printf("%g cycles per hash\n", (float) endTime / 256);
+	}
+	else
+	{
+		while (1);
 	}
 	
 	return 0;

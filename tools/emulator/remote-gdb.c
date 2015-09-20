@@ -43,7 +43,7 @@ static int readByte()
 	unsigned char ch;
 	if (read(gClientSocket, &ch, 1) < 1)
 	{
-		perror("error reading from socket");
+		perror("error reading from debug socket");
 		return -1;
 	}
 	
@@ -99,17 +99,26 @@ static void sendResponsePacket(const char *request)
 	unsigned char checksum;
 	char checksumChars[16];
 	int i;
+	size_t requestLength = strlen(request);
 	
-	write(gClientSocket, "$", 1);
-	write(gClientSocket, request, strlen(request));
-	write(gClientSocket, "#", 1);
+	if (write(gClientSocket, "$", 1) < 1
+		|| write(gClientSocket, request, requestLength) < (ssize_t) requestLength
+		|| write(gClientSocket, "#", 1) < 1)
+	{
+		perror("Error writing to debugger socket");
+		exit(1);
+	}
 
 	checksum = 0;
 	for (i = 0; request[i]; i++)
 		checksum += request[i];
 	
 	sprintf(checksumChars, "%02x", checksum);
-	write(gClientSocket, checksumChars, 2);
+	if (write(gClientSocket, checksumChars, 2) < 2)
+	{
+		perror("Error writing to debugger socket");
+		exit(1);
+	}
 }
 
 static void sendFormattedResponse(const char *format, ...)
@@ -139,7 +148,7 @@ static void runUntilInterrupt(Core *core, uint32_t threadId, int enableFbWindow)
 
 		if (enableFbWindow)
 		{
-			updateFB(getCoreFb(core));
+			updateFramebuffer(getFramebuffer(core));
 			pollEvent();
 		}
 		
@@ -180,7 +189,7 @@ void remoteGdbMainLoop(Core *core, int enableFbWindow)
 	int got;
 	char request[256];
 	uint32_t i;
-	int noAckMode = 0;
+	bool noAckMode = false;
 	int optval;
 	char response[256];
 	uint32_t currentThread = 0;
@@ -193,14 +202,14 @@ void remoteGdbMainLoop(Core *core, int enableFbWindow)
 	listenSocket = socket(PF_INET, SOCK_STREAM, 0);
 	if (listenSocket < 0)
 	{
-		perror("socket");
+		perror("error setting up debug socket (socket)");
 		return;
 	}
 
 	optval = 1;
 	if (setsockopt(listenSocket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0)
 	{
-		perror("setsockopt");
+		perror("error setting up debug socket (setsockopt)");
 		return;
 	}
 	
@@ -209,13 +218,13 @@ void remoteGdbMainLoop(Core *core, int enableFbWindow)
 	address.sin_addr.s_addr = htonl(INADDR_ANY);
 	if (bind(listenSocket, (struct sockaddr*) &address, sizeof(address)) < 0)
 	{	
-		perror("bind");
+		perror("error setting up debug socket (bind)");
 		return;
 	}
 
 	if (listen(listenSocket, 4) < 0)
 	{
-		perror("bind");
+		perror("error setting up debug socket (listen)");
 		return;
 	}
 	
@@ -231,7 +240,7 @@ void remoteGdbMainLoop(Core *core, int enableFbWindow)
 				break;
 		}
 		
-		noAckMode = 0;
+		noAckMode = false;
 
 		// Process commands
 		while (1)
@@ -241,7 +250,13 @@ void remoteGdbMainLoop(Core *core, int enableFbWindow)
 				break;
 			
 			if (!noAckMode)
-				write(gClientSocket, "+", 1);
+			{
+				if (write(gClientSocket, "+", 1) != 1)
+				{
+					perror("Error writing to debug socket");
+					exit(1);
+				}
+			}
 
 			switch (request[0])
 			{
@@ -387,7 +402,7 @@ void remoteGdbMainLoop(Core *core, int enableFbWindow)
 				case 'Q':
 					if (strcmp(request + 1, "StartNoAckMode") == 0)
 					{
-						noAckMode = 1;
+						noAckMode = true;
 						sendResponsePacket("OK");
 					}
 					else

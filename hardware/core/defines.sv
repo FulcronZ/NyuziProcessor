@@ -26,6 +26,7 @@
 
 `define VECTOR_LANES 16
 `define NUM_REGISTERS 32
+`define TOTAL_THREADS (`THREADS_PER_CORE * `NUM_CORES)
 
 typedef logic[31:0] scalar_t;
 typedef scalar_t[`VECTOR_LANES - 1:0] vector_t;
@@ -147,15 +148,13 @@ typedef enum logic [4:0] {
 	CR_FAULT_REASON = 5'd3,
 	CR_FLAGS = 5'd4,	// Maybe stuff some other flags here eventually
 	CR_FAULT_ADDRESS = 5'd5,
-	CR_CYCLE_COUNT = 5'd6,
-	CR_HALT_THREAD = 5'd29,
-	CR_THREAD_ENABLE = 5'd30,
-	CR_HALT = 5'd31
+	CR_CYCLE_COUNT = 5'd6
 } control_register_t;
 
 typedef struct packed {
 	scalar_t pc;
 	logic illegal;
+	logic ifetch_fault;
 	logic has_scalar1;
 	register_idx_t scalar_sel1;
 	logic has_scalar2;
@@ -190,7 +189,8 @@ typedef enum logic[3:0] {
 	FR_RESET,
 	FR_ILLEGAL_INSTRUCTION,
 	FR_INVALID_ACCESS,
-	FR_INTERRUPT
+	FR_INTERRUPT,
+	FR_IFETCH_FAULT
 } fault_reason_t;
 
 `define IEEE754_B32_EXP_WIDTH 8
@@ -359,5 +359,9 @@ interface axi4_interface;
 		m_awcache, m_arcache,
 		output s_awready, s_wready, s_bvalid, s_arready, s_rvalid, s_rdata);
 endinterface
+
+`define CORE_PERF_EVENTS 8	
+`define L2_PERF_EVENTS 3
+`define TOTAL_PERF_EVENTS (`L2_PERF_EVENTS + `CORE_PERF_EVENTS * `NUM_CORES)
 
 `endif

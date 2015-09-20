@@ -16,6 +16,7 @@
 
 #include <errno.h>
 #include <getopt.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/resource.h>
@@ -56,26 +57,26 @@ static uint32_t parseNumArg(const char *argval)
 int main(int argc, char *argv[])
 {
 	Core *core;
-	int c;
-	int enableMemoryDump = 0;
+	int option;
+	bool enableMemoryDump = false;
 	uint32_t memDumpBase = 0;
 	uint32_t memDumpLength = 0;
 	char memDumpFilename[256];
-	int verbose = 0;
+	bool verbose = false;
 	uint32_t fbWidth = 640;
 	uint32_t fbHeight = 480;
-	int blockDeviceOpen = 0;
-	int enableFbWindow = 0;
+	bool blockDeviceOpen = false;
+	bool enableFbWindow = false;
 	uint32_t totalThreads = 4;
 	char *separator;
 	uint32_t memorySize = 0x1000000;
 	
 	enum
 	{
-		kNormal,
-		kCosimulation,
-		kGdbRemoteDebug
-	} mode = kNormal;
+		MODE_NORMAL,
+		MODE_COSIMULATION,
+		MODE_GDB_REMOTE_DEBUG
+	} mode = MODE_NORMAL;
 
 #if 0
 	// Enable coredumps for this process
@@ -85,12 +86,12 @@ int main(int argc, char *argv[])
 	setrlimit(RLIMIT_CORE, &limit);
 #endif
 
-	while ((c = getopt(argc, argv, "if:d:vm:b:t:c:r:")) != -1)
+	while ((option = getopt(argc, argv, "if:d:vm:b:t:c:r:")) != -1)
 	{
-		switch (c)
+		switch (option)
 		{
 			case 'v':
-				verbose = 1;
+				verbose = true;
 				break;
 				
 			case 'r':
@@ -98,7 +99,7 @@ int main(int argc, char *argv[])
 				break;
 				
 			case 'f':
-				enableFbWindow = 1;
+				enableFbWindow = true;
 				separator = strchr(optarg, 'x');
 				if (!separator)
 				{
@@ -112,11 +113,11 @@ int main(int argc, char *argv[])
 				
 			case 'm':
 				if (strcmp(optarg, "normal") == 0)
-					mode = kNormal;
+					mode = MODE_NORMAL;
 				else if (strcmp(optarg, "cosim") == 0)
-					mode = kCosimulation;
+					mode = MODE_COSIMULATION;
 				else if (strcmp(optarg, "gdb") == 0)
-					mode = kGdbRemoteDebug;
+					mode = MODE_GDB_REMOTE_DEBUG;
 				else
 				{
 					fprintf(stderr, "Unkown execution mode %s\n", optarg);
@@ -149,17 +150,14 @@ int main(int argc, char *argv[])
 				}
 				
 				memDumpLength = parseNumArg(separator + 1);
-				enableMemoryDump = 1;
+				enableMemoryDump = true;
 				break;
 				
 			case 'b':
-				if (!openBlockDevice(optarg))
-				{
-					fprintf(stderr, "Couldn't open block device\n");
+				if (openBlockDevice(optarg) < 0)
 					return 1;
-				}
 				
-				blockDeviceOpen = 1;
+				blockDeviceOpen = true;
 				break;
 			
 			case 'c':
@@ -192,7 +190,9 @@ int main(int argc, char *argv[])
 	// We don't randomize memory for cosimulation mode, because 
 	// memory is checked against the hardware model to ensure a match
 
-	core = initCore(memorySize, totalThreads, mode != kCosimulation);
+	core = initCore(memorySize, totalThreads, mode != MODE_COSIMULATION);
+	if (core == NULL)
+		return 1;
 	
 	if (loadHexFile(core, argv[optind]) < 0)
 	{
@@ -201,20 +201,23 @@ int main(int argc, char *argv[])
 	}
 
 	if (enableFbWindow)
-		initFB(fbWidth, fbHeight);
+	{
+		if (initFramebuffer(fbWidth, fbHeight) < 0)
+			return 1;
+	}
 
 	switch (mode)
 	{
-		case kNormal:
+		case MODE_NORMAL:
 			if (verbose)
 				enableTracing(core);
 			
-			setStopOnFault(core, 1);
+			setStopOnFault(core, true);
 			if (enableFbWindow)
 			{
 				while (executeInstructions(core, ALL_THREADS, gScreenRefreshRate))
 				{
-					updateFB(getCoreFb(core));
+					updateFramebuffer(getFramebuffer(core));
 					pollEvent();
 				}
 			}
@@ -223,15 +226,15 @@ int main(int argc, char *argv[])
 
 			break;
 
-		case kCosimulation:
-			setStopOnFault(core, 0);
-			if (!runCosimulation(core, verbose))
+		case MODE_COSIMULATION:
+			setStopOnFault(core, false);
+			if (runCosimulation(core, verbose) < 0)
 				return 1;	// Failed
 
 			break;
 			
-		case kGdbRemoteDebug:
-			setStopOnFault(core, 1);
+		case MODE_GDB_REMOTE_DEBUG:
+			setStopOnFault(core, true);
 			remoteGdbMainLoop(core, enableFbWindow);
 			break;
 	}

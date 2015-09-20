@@ -1,4 +1,4 @@
-These tests verify the 3D rendering library (librender), as well as other 
+These tests verify the 3D rendering library (librender) and other 
 subsystems (compiler, emulator, etc). 
 
 # How to run
@@ -39,9 +39,9 @@ Steps 2 & 3 can be repeated
 
 # Profiling
 
-Type 'make profile'.  It runs the program in the verilog simulator, then 
-prints a list of functions with how many instruction issue cycles occured in 
-each. It does not accumulate time in a function's children.
+Type 'make profile'. It runs the program in the verilog simulator, then prints
+a list of functions with how many instructions it issued in each. It does not
+accumulate time in a function's children.
 
 This requires the c++filt utility, which is part of binutils.
 
@@ -51,14 +51,13 @@ The `make debug` target launches the program in lldb. See notes
 [here](https://github.com/jbush001/NyuziProcessor/blob/master/tools/emulator/README.md) 
 for more details.
 
-To obtain an assembly listing file, type `make program.lst`
+To produce an assembly listing file, type `make program.lst`
 
 ## Run in single threaded mode
 
 Is is generally easier to debug is only one hardware thread is running 
 instead of the default 4. This can also rule out race conditions as a 
-cause. To do this, make two changes to the sources:
-- In main, comment out this line:
+cause. To do this, comment out the following line in main.cpp:
 
-    __builtin_nyuzi_write_control_reg(30, 0xffffffff);    // Start all threads
+    startAllThreads();
 

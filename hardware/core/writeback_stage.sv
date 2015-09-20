@@ -30,11 +30,12 @@
 //   * Exception
 //
 // Exceptions and interrupts are precise in this architecture.
-// Instructions may retire out of order because the execution pipelines have different
-// lengths. Also, it's possible, after a rollback, for earlier instructions from the same
-// thread to arrive at this stage for several cycles (because they were in the longer floating
-// point pipeline). The rollback signal does not flush later stages of the multicycle
-// pipeline for this reason. This can be challenging to visualize.
+// Instructions may retire out of order because the execution pipelines have 
+// different lengths. It's also possible, after a rollback, for earlier 
+// instructions from the same thread to arrive at this stage (because they were 
+// in the longer floating point pipeline). The rollback signal does not flush 
+// later stages of the multicycle pipeline for this reason. This can be 
+// challenging to visualize.
 //
 
 module writeback_stage(
@@ -171,7 +172,7 @@ module writeback_stage(
 		wb_interrupt_ack = 0;
 		wb_fault_access_addr = 0;
 
-		if (ix_instruction_valid && ix_instruction.illegal)
+		if (ix_instruction_valid && (ix_instruction.illegal || ix_instruction.ifetch_fault))
 		begin
 			// Illegal instruction fault
 			wb_rollback_en = 1'b1;
@@ -179,8 +180,9 @@ module writeback_stage(
 			wb_rollback_thread_idx = ix_thread_idx;
 			wb_rollback_pipeline = PIPE_SCYCLE_ARITH;
 			wb_fault = 1;
-			wb_fault_reason = FR_ILLEGAL_INSTRUCTION;
+			wb_fault_reason = ix_instruction.ifetch_fault ? FR_IFETCH_FAULT : FR_ILLEGAL_INSTRUCTION;
 			wb_fault_pc = ix_instruction.pc;
+			wb_fault_access_addr = ix_instruction.pc;
 			wb_fault_thread_idx = ix_thread_idx;
 		end
 		else if (dd_instruction_valid && dd_access_fault)

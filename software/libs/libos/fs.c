@@ -30,12 +30,7 @@
 #include "sdmmc.h"
 #include "unistd.h"
 
-// Setting this flag will read from a ramdisk in high memory rather
-// than the SD device. The serial_loader will transfer the ramdisk data 
-// into memory.
-//#define ENABLE_RAMDISK 1
-
-#define FS_MAGIC 'spfs'
+#define FS_MAGIC "spfs"
 #define MAX_DESCRIPTORS 32
 #define RAMDISK_BASE ((unsigned char*) 0x4000000)
 
@@ -60,23 +55,25 @@ struct DirectoryEntry
 
 struct FsHeader
 {
-	int magic;
-	int numDirectoryEntries;
+	char magic[4];
+	unsigned int numDirectoryEntries;
 	DirectoryEntry dir[1];
 };
 
 static FileDescriptor gFileDescriptors[MAX_DESCRIPTORS];
 static int gInitialized;
 static FsHeader *gDirectory;
+static int useRamdisk = 0;
 
 int readBlock(int blockNum, void *ptr)
 {
-#if ENABLE_RAMDISK
-	memcpy(ptr, RAMDISK_BASE + blockNum * BLOCK_SIZE, BLOCK_SIZE);
-	return 1;
-#else
-	return readSdmmcDevice(blockNum, ptr);
-#endif
+	if (useRamdisk)
+	{
+		memcpy(ptr, RAMDISK_BASE + blockNum * BLOCK_SIZE, BLOCK_SIZE);
+		return 1;
+	}
+	else
+		return readSdmmcDevice(blockNum, ptr);
 }
 
 static int initFileSystem()
@@ -85,19 +82,22 @@ static int initFileSystem()
 	int numDirectoryBlocks;
 	int blockNum;
 	FsHeader *header;
-	
-#if !ENABLE_RAMDISK
-	initSdmmcDevice();
-#endif
+
+	// SDMMC not supported on FPGA currently. Fall back to ramdisk if it fails.
+	if (initSdmmcDevice() < 0)
+	{
+		printf("SDMMC init failed, using ramdisk\n");
+		useRamdisk = 1;
+	}
 	
 	// Read directory
 	if (!readBlock(0, superBlock))
 		return -1;
 
 	header = (FsHeader*) superBlock;
-	if (header->magic != FS_MAGIC)
+	if (memcmp(header->magic, FS_MAGIC, 4) != 0)
 	{
-		printf("bad magic on header\n");
+		printf("Bad filesystem: invalid magic value\n");
 		return -1;
 	}
 	
@@ -207,8 +207,8 @@ int read(int fd, void *buf, unsigned int nbytes)
 	}
 
 	sizeToCopy = fdPtr->fileLength - fdPtr->currentOffset;
-	if (sizeToCopy < 0)
-		return 0;	// Past end of file
+	if (sizeToCopy <= 0)
+		return -1;	// End of file
 	
 	if (nbytes > sizeToCopy)
 		nbytes = sizeToCopy;

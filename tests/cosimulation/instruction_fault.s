@@ -1,5 +1,5 @@
 # 
-# Copyright 2011-2015 Jeff Bush
+# Copyright 2015 Jeff Bush
 # 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
 
 
 #
-# Data alignment fault
+# Instruction alignment fault
 #
 
         	    .text
@@ -27,34 +27,21 @@
 			    .globl	_start
 			    .align	4
 			    .type	main,@function
-_start:			START_ALL_THREADS
-		
-				lea s0, fault_handler
+_start:			lea s0, fault_handler
 			    setcr s0, 1			# Set fault handler address
-			    lea s1, testvar1
+			   
+			    lea s1, branch_address
 			    add_i s1, s1, 1
-			    load_32 s2, (s1)	# Invalid word alignment, load
-				move s10, 1
-			    store_32 s2, (s1)	# Invalid word alignment, store
-				move s10, 2
-			    load_s16 s2, (s1)	# Invalid short alignment, load
-				move s10, 3
-			    load_u16 s2, (s1)	# Invalid unsigned short alignment, load
-				move s10, 4
-			    store_16 s2, (s1)	# Invalid short alignment, store
-				move s10, 5
-				load_v v2, (s1)		# Invalid vector alignment, load
-				move s10, 6
-				store_v v2, (s1)	# Invalid vector alignment, store
-
-				HALT_CURRENT_THREAD
+				move pc, s1
+				move s10, 1			# Shouldn't happen (no branch)
+				goto done
+				
+branch_address:	move s10, 2			# Shouldn't happen (bad address)
+				goto done
 
 
 fault_handler: 	getcr s11, 2		# Fault PC
 				getcr s12, 3		# Reason
 				getcr s13, 5		# Access address
-				add_i pc, s11, 4	# Jump back to next instruction
 
-			   .align 4
-testvar1: 	   .long 0x1234abcd, 0, 0, 0
-			
+done:			HALT_CURRENT_THREAD

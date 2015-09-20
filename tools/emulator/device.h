@@ -19,6 +19,19 @@
 
 #include <stdint.h>
 
+// Device addresses
+enum DeviceAddress {
+	REG_SERIAL_STATUS = 0x18,
+	REG_SERIAL_OUTPUT = 0x20,
+	REG_KEYBOARD_STATUS = 0x38,
+	REG_KEYBOARD_READ = 0x3c,
+	REG_REAL_TIME_CLOCK = 0x40, 
+	REG_SD_WRITE_DATA = 0x44,
+	REG_SD_READ_DATA = 0x48,
+	REG_SD_STATUS = 0x4c,
+	REG_SD_CONTROL = 0x50
+};
+
 int openBlockDevice(const char *filename);
 void closeBlockDevice();
 void writeDeviceRegister(uint32_t address, uint32_t value);

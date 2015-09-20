@@ -22,31 +22,29 @@ static SDL_Window *gWindow;
 static SDL_Renderer *gRenderer;
 static SDL_Texture *gFrameBuffer;
 static uint32_t gFbWidth;
-static SDL_Scancode gLastCode;
-static int keyIsDown;
 uint32_t gScreenRefreshRate = 500000;
 
-int initFB(uint32_t width, uint32_t height)
+int initFramebuffer(uint32_t width, uint32_t height)
 {
 	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_NOPARACHUTE) != 0)
 	{
 		printf("SDL_Init error: %s\n", SDL_GetError());
-		return 0;
+		return -1;
 	}
 	
-	gWindow = SDL_CreateWindow("FrameBuffer", SDL_WINDOWPOS_UNDEFINED, 
+	gWindow = SDL_CreateWindow("Nyuzi Emulator", SDL_WINDOWPOS_UNDEFINED, 
 		SDL_WINDOWPOS_UNDEFINED, (int) width, (int) height, SDL_WINDOW_SHOWN);
 	if (!gWindow)
 	{
 		printf("SDL_CreateWindow error: %s\n", SDL_GetError());
-		return 0;
+		return -1;
 	}
 	
 	gRenderer = SDL_CreateRenderer(gWindow, -1, SDL_RENDERER_ACCELERATED);
 	if (!gRenderer)
 	{
 		printf("SDL_CreateRenderer error: %s\n", SDL_GetError());
-		return 0;
+		return -1;
 	}
 	
 	gFbWidth = width;
@@ -55,10 +53,10 @@ int initFB(uint32_t width, uint32_t height)
 	if (!gFrameBuffer)
 	{
 		printf("SDL_CreateTexture error: %s\n", SDL_GetError());
-		return 0;
+		return -1;
 	}
 	
-	return 1;
+	return 0;
 }
 
 // PS/2 scancodes set 2
@@ -198,27 +196,30 @@ void pollEvent(void)
 				exit(0);
 			
 			case SDL_KEYDOWN:
-				// Supress autorepeat, otherwise driver queue fills up
-				if (keyIsDown && gLastCode == event.key.keysym.scancode)
-					return;	
-	
-				gLastCode = event.key.keysym.scancode;
-				keyIsDown = 1;
 				convertAndEnqueueScancode(event.key.keysym.scancode, 0);
 				break;
 				
 			case SDL_KEYUP:
-				keyIsDown = 0;
 				convertAndEnqueueScancode(event.key.keysym.scancode, 1);
 				break;
 		}
 	}	
 }
 
-void updateFB(const void *base)
+void updateFramebuffer(const void *base)
 {
-	SDL_UpdateTexture(gFrameBuffer, NULL, base, (int)(gFbWidth * 4));
-	SDL_RenderCopy(gRenderer, gFrameBuffer, NULL, NULL);
+	if (SDL_UpdateTexture(gFrameBuffer, NULL, base, (int)(gFbWidth * 4)) != 0)
+	{
+		printf("SDL_UpdateTexture failed: %s\n", SDL_GetError());
+		abort();
+	}
+	
+	if (SDL_RenderCopy(gRenderer, gFrameBuffer, NULL, NULL) != 0)
+	{
+		printf("SDL_RenderCopy failed: %s\n", SDL_GetError());
+		abort();
+	}
+	
 	SDL_RenderPresent(gRenderer);
 }
 

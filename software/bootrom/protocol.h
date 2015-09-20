@@ -14,28 +14,20 @@
 // limitations under the License.
 // 
 
+#ifndef __PROTOCOL_H
+#define __PROTOCOL_H
 
-#pragma once
+enum MessageType
+{
+	LOAD_MEMORY_REQ = 0xc0,
+	LOAD_MEMORY_ACK,
+	EXECUTE_REQ,
+	EXECUTE_ACK,
+	PING_REQ,
+	PING_ACK,
+	CLEAR_MEMORY_REQ,
+	CLEAR_MEMORY_ACK,
+	BAD_COMMAND
+};
 
-#define CHAR_BIT 8
-#define INT8_MIN 0x80
-#define INT8_MAX 0x7f
-#define UCHAR_MAX 0xff
-#define INT16_MIN 0x8000
-#define INT16_MAX 0x7fff
-#define SHRT_MIN 0x8000
-#define SHRT_MAX 0x7fff
-#define INT32_MIN 0x80000000L
-#define INT32_MAX 0x7fffffffL
-#define INT_MIN 0x80000000
-#define INT_MAX 0x7fffffff
-#define INT64_MIN 0x8000000000000000LL
-#define INT64_MAX 0x7fffffffffffffffLL
-#define UINT8_MAX 0xff
-#define UINT16_MAX 0xffff
-#define UINT32_MAX 0xffffffffL
-#define UINT64_MAX 0xffffffffffffffffull
-#define LLONG_MAX INT64_MAX
-#define LLONG_MIN INT64_MIN
-#define UINT_MAX UINT32_MAX
-
+#endif
