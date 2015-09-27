@@ -37,31 +37,29 @@
 
 typedef struct Thread Thread;
 
-
-
 struct Thread
 {
-	uint32_t id;
 	Core *core;
+	uint32_t id;
 	uint32_t linkedAddress; // For synchronized store/load. Cache line (addr / 64)
 	uint32_t currentPc;
-	uint32_t scalarReg[NUM_REGISTERS - 1];	// 31 is PC, which is special
-	uint32_t vectorReg[NUM_REGISTERS][NUM_VECTOR_LANES];
 	FaultReason lastFaultReason;
 	uint32_t lastFaultPc;
 	uint32_t lastFaultAddress;
 	uint32_t interruptEnable;
 	uint32_t multiCycleTransferActive;
 	uint32_t multiCycleTransferLane;
+	uint32_t scalarReg[NUM_REGISTERS - 1];	// 31 is PC, which is special
+	uint32_t vectorReg[NUM_REGISTERS][NUM_VECTOR_LANES];
 };
 
 struct Core
 {
+	Thread *threads;
+	struct Breakpoint *breakpoints;
 	uint32_t *memory;
 	uint32_t memorySize;
 	uint32_t totalThreads;
-	Thread *threads;
-	struct Breakpoint *breakpoints;
 	uint32_t threadEnableMask;
 	uint32_t faultHandlerPc;
 	bool halt;
@@ -83,12 +81,12 @@ static void doHalt(Core *core);
 static uint32_t getThreadScalarReg(const Thread *thread, uint32_t reg);
 static void setScalarReg(Thread *thread, uint32_t reg, uint32_t value);
 static void setVectorReg(Thread *thread, uint32_t reg, uint32_t mask, 
-	uint32_t values[NUM_VECTOR_LANES]);
+	uint32_t *values);
 static void invalidateSyncAddress(Core *core, uint32_t address);
 static void memoryAccessFault(Thread *thread, uint32_t address, bool isLoad, FaultReason);
 static void illegalInstruction(Thread *thread, uint32_t instr);
 static void writeMemBlock(Thread *thread, uint32_t address, uint32_t mask, 
-	const uint32_t values[NUM_VECTOR_LANES]);
+	const uint32_t *values);
 static void writeMemWord(Thread *thread, uint32_t address, uint32_t value);
 static void writeMemShort(Thread *thread, uint32_t address, uint32_t value);
 static void writeMemByte(Thread *thread, uint32_t address, uint32_t value);
@@ -240,11 +238,12 @@ void printRegisters(const Core *core, uint32_t threadId)
 	}
 }
 
-void enableCosimulation(Core *core, bool enable)
+void enableCosimulation(Core *core)
 {
-	core->cosimEnable = enable;
+	core->cosimEnable = true;
 }
 
+// Called when the verilog model in cosimulation indicates an interrupt.
 void cosimInterrupt(Core *core, uint32_t threadId, uint32_t pc)
 {
 	Thread *thread = &core->threads[threadId];
@@ -342,15 +341,21 @@ void writeMemoryByte(const Core *core, uint32_t address, uint8_t byte)
 	((uint8_t*) core->memory)[address] = byte;
 }
 
-void setBreakpoint(Core *core, uint32_t pc)
+int setBreakpoint(Core *core, uint32_t pc)
 {
 	struct Breakpoint *breakpoint = lookupBreakpoint(core, pc);
 	if (breakpoint != NULL)
 	{
-		printf("already has a breakpoint at this address\n");
-		return;
+		printf("already has a breakpoint at address %x\n", pc);
+		return -1;
 	}
-		
+	
+	if (pc >= core->memorySize || (pc & 3) != 0)
+	{
+		printf("invalid breakpoint address %x\n", pc);
+		return -1;
+	}
+
 	breakpoint = (struct Breakpoint*) calloc(sizeof(struct Breakpoint), 1);
 	breakpoint->next = core->breakpoints;
 	core->breakpoints = breakpoint;
@@ -360,9 +365,10 @@ void setBreakpoint(Core *core, uint32_t pc)
 		breakpoint->originalInstruction = 0;	// Avoid infinite loop
 	
 	core->memory[pc / 4] = BREAKPOINT_OP;
+	return 0;
 }
 
-void clearBreakpoint(Core *core, uint32_t pc)
+int clearBreakpoint(Core *core, uint32_t pc)
 {
 	struct Breakpoint **link;
 
@@ -372,17 +378,11 @@ void clearBreakpoint(Core *core, uint32_t pc)
 		{
 			core->memory[pc / 4] = (*link)->originalInstruction;
 			*link = (*link)->next;
-			break;
+			return 0;
 		}
 	}
-}
 
-void forEachBreakpoint(const Core *core, void (*callback)(uint32_t pc))
-{
-	const struct Breakpoint *breakpoint;
-
-	for (breakpoint = core->breakpoints; breakpoint; breakpoint = breakpoint->next)
-		callback(breakpoint->address);
+	return -1; // Not found
 }
 
 void setStopOnFault(Core *core, bool stopOnFault)
@@ -417,7 +417,7 @@ static void setScalarReg(Thread *thread, uint32_t reg, uint32_t value)
 		thread->scalarReg[reg] = value;
 }
 
-static void setVectorReg(Thread *thread, uint32_t reg, uint32_t mask, uint32_t values[NUM_VECTOR_LANES])
+static void setVectorReg(Thread *thread, uint32_t reg, uint32_t mask, uint32_t *values)
 {
 	int lane;
 
@@ -500,7 +500,7 @@ static void illegalInstruction(Thread *thread, uint32_t instr)
 }
 
 static void writeMemBlock(Thread *thread, uint32_t address, uint32_t mask, 
-	const uint32_t values[NUM_VECTOR_LANES])
+	const uint32_t *values)
 {
 	uint32_t lane;
 
@@ -782,7 +782,7 @@ static void executeRegisterArithInst(Thread *thread, uint32_t instr)
 	
 		if (op == OP_SHUFFLE)
 		{
-			uint32_t *src1 = thread->vectorReg[op1reg];
+			const uint32_t *src1 = thread->vectorReg[op1reg];
 			const uint32_t *src2 = thread->vectorReg[op2reg];
 			
 			for (lane = 0; lane < NUM_VECTOR_LANES; lane++)
@@ -1119,7 +1119,6 @@ static void executeVectorLoadStoreInst(Thread *thread, uint32_t instr)
 		break;
 
 		default:
-		{
 			// Multi-cycle vector access.
 			if (!thread->multiCycleTransferActive)
 			{
@@ -1163,7 +1162,6 @@ static void executeVectorLoadStoreInst(Thread *thread, uint32_t instr)
 				writeMemWord(thread, address, thread->vectorReg[destsrcreg][lane]);
 
 			break;
-		}
 	}
 
 	if (thread->multiCycleTransferActive)

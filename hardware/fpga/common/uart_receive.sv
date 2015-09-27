@@ -34,17 +34,14 @@ module uart_receive
 
 	receive_state_t state_ff;
 	receive_state_t state_nxt;
-	logic[3:0] sample_count_ff;
-	logic[3:0] sample_count_nxt;
+	logic[11:0] sample_count_ff;
+	logic[11:0] sample_count_nxt;
 	logic[7:0] shift_register;	
 	logic[3:0] bit_count_ff;
 	logic[3:0] bit_count_nxt;
 	logic do_shift;
-	logic[10:0] clock_divider;
 	logic rx_sync;
-	logic sample_enable;
 
-	assign sample_enable = clock_divider == 0;
 	assign rx_char = shift_register;
 
 	synchronizer #(.RESET_STATE(1)) rx_synchronizer(
@@ -67,7 +64,11 @@ module uart_receive
 				if (!rx_sync)
 				begin
 					state_nxt = STATE_READ_CHARACTER;
-					sample_count_nxt = 12;	// Scan to middle of first bit
+					
+					// We are at the beginning of the start bit. Next
+					// sample point is in middle of first data bit.
+					// Set divider to 1.5 times bit duration.
+					sample_count_nxt = 12'((BAUD_DIVIDE * 3 / 2) - 1);
 				end
 			end
 
@@ -75,7 +76,7 @@ module uart_receive
 			begin
 				if (sample_count_ff == 0)
 				begin
-					sample_count_nxt = 8;
+					sample_count_nxt = BAUD_DIVIDE - 1;
 					if (bit_count_ff == 8)
 					begin
 						state_nxt = STATE_WAIT_START;
@@ -85,11 +86,11 @@ module uart_receive
 					else
 					begin
 						do_shift = 1;
-						bit_count_nxt = bit_count_ff + 1;
+						bit_count_nxt = bit_count_ff + 4'd1;
 					end
 				end
-				else if (sample_enable)
-					sample_count_nxt = sample_count_ff - 1;
+				else
+					sample_count_nxt = sample_count_ff - 12'd1;
 			end
 		endcase
 	end
@@ -101,10 +102,9 @@ module uart_receive
 			state_ff <= STATE_WAIT_START;
 			/*AUTORESET*/
 			// Beginning of autoreset for uninitialized flops
-			bit_count_ff <= 4'h0;
-			clock_divider <= 11'h0;
-			sample_count_ff <= 4'h0;
-			shift_register <= 8'h0;
+			bit_count_ff <= '0;
+			sample_count_ff <= '0;
+			shift_register <= '0;
 			// End of automatics
 		end
 		else
@@ -114,16 +114,12 @@ module uart_receive
 			bit_count_ff <= bit_count_nxt;
 			if (do_shift)
 				shift_register <= { rx_sync, shift_register[7:1] };
-				
-			if (clock_divider == 0)
-				clock_divider <= BAUD_DIVIDE;
-			else
-				clock_divider <= clock_divider - 1;
 		end
 	end
 endmodule
 
 // Local Variables:
 // verilog-typedef-regexp:"_t$"
+// verilog-auto-reset-widths:unbased
 // End:
 

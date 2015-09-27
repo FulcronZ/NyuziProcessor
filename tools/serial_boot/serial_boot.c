@@ -54,7 +54,7 @@ int open_serial_port(const char *path)
 	// Configure serial options
 	memset(&serialopts, 0, sizeof(serialopts));
 	serialopts.c_cflag = CS8 | CLOCAL | CREAD;
-	cfsetspeed(&serialopts, B115200);
+	cfsetspeed(&serialopts, 921600);
 	if (tcsetattr(serial_fd, TCSANOW, &serialopts) != 0)
 	{
 		perror("Unable to initialize serial port");
@@ -111,7 +111,7 @@ int read_serial_long(int serial_fd, unsigned int *out, int timeout)
 		if (!read_serial_byte(serial_fd, &ch, timeout))
 			return 0;
 
-		result = (result >> 8) | (ch << 24);
+		result = (result >> 8) | ((unsigned int) ch << 24);
 	}
 	
 	*out = result;

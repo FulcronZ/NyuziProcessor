@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # 
 # Copyright 2011-2015 Jeff Bush
 # 
@@ -14,24 +15,17 @@
 # limitations under the License.
 # 
 
-TOPDIR=../../..
+import sys
+import subprocess
 
-include $(TOPDIR)/build/target.mk
+sys.path.insert(0, '../..')
+import test_harness
 
-CFLAGS=-O3
-
-chargen.hex: chargen.c 
-	$(CC) $(CFLAGS) chargen.c -o chargen.elf ../../../software/libs/libc/crt0.o
-	$(ELF2HEX) -o chargen.hex chargen.elf
-
-run: chargen.hex
-	$(SERIAL_BOOT) $(SERIAL_PORT) chargen.hex
-
-run-verilator: chargen.hex
-	../../../bin/verilator_model +bin=chargen.hex
-
-clean: FORCE
-	rm -f chargen.elf chargen.hex
-
-FORCE:
-
+test_harness.compile_test('fs.c')
+subprocess.check_call(['../../../bin/mkfs', 'obj/fsimage.bin', 'test.txt'])
+result = test_harness.run_emulator(block_device='obj/fsimage.bin')
+if result.find('PASS') == -1:
+	print 'FAIL'
+	sys.exit(1)
+else:
+	print 'PASS'

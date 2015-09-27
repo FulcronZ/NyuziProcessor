@@ -14,19 +14,29 @@
 // limitations under the License.
 // 
 
+#include <schedule.h>
+#include <stdio.h>
 
-#ifndef __COSIMULATION_H
-#define __COSIMULATION_H
+//
+// This test only works with 8 cores enabled
+// In hardware/core/config.sv, set NUM_CORES to 8
+//
 
-#include "core.h"
+static volatile int gCurrentThread = 0;
+const int kNumThreads = 32;
 
-// Returns -1 on error, 0 if successful.
-int runCosimulation(Core *core, bool verbose);
-void cosimSetScalarReg(Core *core, uint32_t pc, uint32_t reg, uint32_t value);
-void cosimSetVectorReg(Core *core, uint32_t pc, uint32_t reg, uint32_t mask, 
-	const uint32_t *value);
-void cosimWriteBlock(Core *core, uint32_t pc, uint32_t address, uint32_t mask, 
-	const uint32_t *values);
-void cosimWriteMemory(Core *core, uint32_t pc, uint32_t address, uint32_t size, uint32_t value);
+int main(int argc, const char *argv[])
+{
+	int myThreadId = __builtin_nyuzi_read_control_reg(0);
+	
+	startAllThreads();
+	
+	for (;;)
+	{
+		while (gCurrentThread != myThreadId)
+			;
 
-#endif
+		printf("%d\n", myThreadId);
+		gCurrentThread = (gCurrentThread + 1) % kNumThreads;
+	}
+}

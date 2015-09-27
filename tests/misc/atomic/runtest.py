@@ -15,16 +15,16 @@
 # limitations under the License.
 # 
 
-import subprocess
 import sys
 
-subprocess.check_call(['mkdir', '-p', 'WORK'])
-subprocess.check_call(['/usr/local/llvm-nyuzi/bin/clang', '-o', 'WORK/test.elf', 'atomic.c', '../../../software/libs/libc/crt0.o'])
-subprocess.check_call(['/usr/local/llvm-nyuzi/bin/elf2hex', '-o', 'WORK/test.hex', 'WORK/test.elf'])
-subprocess.check_call(['../../../bin/verilator_model', '+memdumpfile=WORK/vmem.bin', 
-	'+memdumpbase=100000', '+memdumplen=800', '+autoflushl2=1', '+bin=WORK/test.hex'])
+sys.path.insert(0, '../..')
+import test_harness
 
-with open('WORK/vmem.bin', 'rb') as f:
+test_harness.compile_test('atomic.c')
+test_harness.run_verilator(dump_file='obj/vmem.bin', dump_base=0x100000, dump_length=0x800,
+	extra_args=['+autoflushl2=1'])
+
+with open('obj/vmem.bin', 'rb') as f:
 	while True:
 		val = f.read(4)
 		if val == '':

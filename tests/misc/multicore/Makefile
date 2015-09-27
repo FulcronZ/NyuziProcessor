@@ -14,24 +14,25 @@
 # limitations under the License.
 # 
 
-TOPDIR=../../..
+TOPDIR=../../../
 
 include $(TOPDIR)/build/target.mk
 
-CFLAGS=-O3
+LIBS=-lc -los
+SRCS=multicore.c
 
-chargen.hex: chargen.c 
-	$(CC) $(CFLAGS) chargen.c -o chargen.elf ../../../software/libs/libc/crt0.o
-	$(ELF2HEX) -o chargen.hex chargen.elf
+OBJS := $(TOPDIR)/software/libs/libc/crt0.o $(SRCS_TO_OBJS)
+DEPS := $(SRCS_TO_DEPS)
 
-run: chargen.hex
-	$(SERIAL_BOOT) $(SERIAL_PORT) chargen.hex
+$(OBJ_DIR)/multicore.hex: $(OBJS)
+	$(LD) -o $(OBJ_DIR)/multicore.elf $(LDFLAGS) $(OBJS) $(LDFLAGS) $(LIBS)
+	$(ELF2HEX) -o $(OBJ_DIR)/multicore.hex $(OBJ_DIR)/multicore.elf
 
-run-verilator: chargen.hex
-	../../../bin/verilator_model +bin=chargen.hex
+verirun: $(OBJ_DIR)/multicore.hex
+	$(VERILATOR) +bin=$(OBJ_DIR)/multicore.hex
 
-clean: FORCE
-	rm -f chargen.elf chargen.hex
+clean:
+	rm -rf $(OBJ_DIR)
 
-FORCE:
+-include $(DEPS)
 
