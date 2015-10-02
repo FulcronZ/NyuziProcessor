@@ -30,8 +30,8 @@
 typedef struct Core Core;
 
 Core *initCore(uint32_t memsize, uint32_t totalThreads, bool randomizeMemory);
-void enableTracing(Core *core);
-int loadHexFile(Core *core, const char *filename);
+void enableTracing(Core*);
+int loadHexFile(Core*, const char *filename);
 void writeMemoryToFile(const Core*, const char *filename, uint32_t baseAddress, 
 	uint32_t length);
 void *getFramebuffer(Core*);
@@ -60,5 +60,7 @@ void writeMemoryByte(const Core*, uint32_t addr, uint8_t byte);
 int setBreakpoint(Core*, uint32_t pc);
 int clearBreakpoint(Core*, uint32_t pc);
 void setStopOnFault(Core*, bool stopOnFault);
+
+void dumpInstructionStats(Core*);
 
 #endif

@@ -14,7 +14,6 @@
 // limitations under the License.
 // 
 
-
 `include "defines.sv"
 
 //
@@ -27,14 +26,13 @@
 // Fill:
 // The cache asserts fill_en and fill_set when it fills a cache line.
 // One cycle later, this module sets fill_way to the least recently used way 
-// (which the cache will replace) and moves that way to the MRU.
+// (which the cache will replace) and moves that way to the most recently used
+// position.
 //
 // Access: 
 // During the first cycle of a cache loads, the client asserts access_en and 
 // access_set. If there was a cache hit, it asserts update_en and update_way 
-// one cycle later to update the accessed way to the MRU position. It is 
-// illegal to assert update_en without asserting access_en in the previous 
-// cycle.
+// one cycle later to update the accessed way to the MRU position. 
 //
 // If the client asserts fill_en and access_en simultaneously, fill wins. This 
 // is important to avoid evicting recently loaded lines when there are many 
@@ -182,6 +180,15 @@ module cache_lru
 				endcase
 			end
 		end
+		else
+		begin
+			initial
+			begin
+				$display("%m invalid number of ways");
+				$finish;
+			end
+		end
+		
 
 		// XXX does not flag error on invalid number of ways
 	endgenerate
