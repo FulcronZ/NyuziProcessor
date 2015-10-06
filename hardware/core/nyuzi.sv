@@ -93,6 +93,14 @@ module nyuzi
 
 	io_arbiter io_arbiter(.*);
 
+	// performance_monitor_unit #(.NUM_COUNTERS(`TOTAL_PERF_EVENTS)) (
+	// clk(),
+	// reset(),
+	// perf_events(),
+	// perf_write_en(),
+	// perf_read_en(),
+	// perf_write_data();
+	// perf_read_data());
 	performance_counters #(.NUM_COUNTERS(`TOTAL_PERF_EVENTS)) performance_counters(
 		.*);
 endmodule
