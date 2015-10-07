@@ -91,10 +91,46 @@ module nyuzi
 		.l2_perf_events(perf_events[`L2_PERF_EVENTS - 1:0]),
 		.*);
 
-	io_arbiter io_arbiter(.*);
-
-	performance_counters #(.NUM_COUNTERS(`TOTAL_PERF_EVENTS)) performance_counters(
+	// XXX: Multiplex io_read_data to get perf counter on it
+	logic[31:0] io_arbiter_read_data;
+	io_arbiter io_arbiter(.io_read_data(io_arbiter_read_data),
 		.*);
+
+	localparam COUNTER_WIDTH = 32;
+	localparam PMU_ADDR = 32'hffff1000;
+
+	wire[31:0] perf_read_data;
+	performance_counters #(.NUM_COUNTERS(`TOTAL_PERF_EVENTS), 
+		.PRFC_WIDTH(COUNTER_WIDTH),
+		.BASE_ADDRESS(PMU_ADDR)) performance_counters(
+		.io_read_data(perf_read_data),
+		.*);
+
+	reg perf_sel;
+	always_ff @(posedge clk, posedge reset)
+	begin
+		if (reset)
+			perf_sel <= 0;
+		else
+		begin
+			if (io_read_en)
+			begin
+				if (io_address == PMU_ADDR)
+					perf_sel <= 1;
+				else
+					perf_sel <= 0;
+			end
+		end
+	end
+
+	always_comb
+	begin
+		if (perf_sel)
+			io_arbiter_read_data = perf_read_data;
+		else
+			io_arbiter_read_data = io_read_data;
+	end
+
 endmodule
 
 // Local Variables:
