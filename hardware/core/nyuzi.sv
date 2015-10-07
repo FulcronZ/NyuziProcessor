@@ -115,7 +115,7 @@ module nyuzi
 		begin
 			if (io_read_en)
 			begin
-				if (io_address == PMU_ADDR)
+				if (io_address[15:0] == 16'h1000)
 					perf_sel <= 1;
 				else
 					perf_sel <= 0;
