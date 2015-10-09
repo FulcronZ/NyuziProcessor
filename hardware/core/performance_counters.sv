@@ -34,18 +34,14 @@ module performance_counters
 	input						io_write_en,
 	input[31:0]					io_write_data,
 	input						io_read_en,
-	output logic[31:0]			io_read_data);
+	output reg[31:0]			io_read_data);
 	
 	logic[PRFC_WIDTH - 1:0] event_counter[NUM_COUNTERS];
 	reg[31:0] pointed_counter_idx;
 
-	always_comb
+	always_ff @(posedge clk)
 	begin
-		for (int i = 0; i < NUM_COUNTERS; i++)
-		begin
-			if (i == pointed_counter_idx)
-				io_read_data = event_counter[i];
-		end
+		io_read_data <= event_counter[pointed_counter_idx];
 	end
 
 	always_ff @(posedge clk, posedge reset)
