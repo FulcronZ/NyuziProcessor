@@ -1,18 +1,18 @@
-// 
+//
 // Copyright 2011-2015 Jeff Bush
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-// 
+//
 
 `include "defines.sv"
 
@@ -21,13 +21,13 @@
 // - Performs simple operations that only require a single stage like integer
 //   addition or bitwise logical operations.
 // - Detects branches
-// 
+//
 
 module int_execute_stage(
 	input                             clk,
 	input                             reset,
-	
-	// From operand fetch stage
+
+	// From operand_fetch_stage
 	input vector_t                    of_operand1,
 	input vector_t                    of_operand2,
 	input vector_lane_mask_t          of_mask_value,
@@ -35,16 +35,19 @@ module int_execute_stage(
 	input decoded_instruction_t       of_instruction,
 	input thread_idx_t                of_thread_idx,
 	input subcycle_t                  of_subcycle,
-	
-	// From writeback stage
+
+	// From writeback_stage
 	input logic                       wb_rollback_en,
 	input thread_idx_t                wb_rollback_thread_idx,
-	
-	// To/From control register
+
+	// From control_registers
 	input scalar_t                    cr_eret_address[`THREADS_PER_CORE],
+	input                             cr_supervisor_en[`THREADS_PER_CORE],
+
+	// To control_registers
 	output logic                      ix_is_eret,
-	
-	// To writeback stage
+
+	// To writeback_stage
 	output logic                      ix_instruction_valid,
 	output decoded_instruction_t      ix_instruction,
 	output vector_t                   ix_result,
@@ -52,9 +55,12 @@ module int_execute_stage(
 	output thread_idx_t               ix_thread_idx,
 	output logic                      ix_rollback_en,
 	output scalar_t                   ix_rollback_pc,
-	output subcycle_t                 ix_subcycle);
+	output subcycle_t                 ix_subcycle,
+	output logic                      ix_privileged_op_fault);
 
 	vector_t vector_result;
+	logic is_eret;
+	logic privileged_op_fault;
 
 	genvar lane;
 	generate
@@ -65,7 +71,7 @@ module int_execute_stage(
 			scalar_t lane_result;
 			scalar_t difference;
 			logic borrow;
-			logic negative; 
+			logic negative;
 			logic overflow;
 			logic zero;
 			logic signed_gtr;
@@ -76,11 +82,11 @@ module int_execute_stage(
 			logic[5:0] reciprocal_estimate;
 			logic shift_in_sign;
 			scalar_t rshift;
-			
+
 			assign lane_operand1 = of_operand1[lane];
 			assign lane_operand2 = of_operand2[lane];
-			assign { borrow, difference } = { 1'b0, lane_operand1 } - { 1'b0, lane_operand2 };
-			assign negative = difference[31]; 
+			assign {borrow, difference} = {1'b0, lane_operand1} - {1'b0, lane_operand2};
+			assign negative = difference[31];
 			assign overflow = lane_operand2[31] == negative && lane_operand1[31] != lane_operand2[31];
 			assign zero = difference == 0;
 			assign signed_gtr = overflow == negative;
@@ -169,7 +175,7 @@ module int_execute_stage(
 
 			// Right shift
 			assign shift_in_sign = of_instruction.alu_op == OP_ASHR ? lane_operand1[31] : 1'd0;
-			assign rshift = scalar_t'({ {32{shift_in_sign}}, lane_operand1 } >> lane_operand2[4:0]);
+			assign rshift = scalar_t'({{32{shift_in_sign}}, lane_operand1} >> lane_operand2[4:0]);
 
 			// Reciprocal estimate
 			assign fp_operand = lane_operand2;
@@ -181,21 +187,21 @@ module int_execute_stage(
 			begin
 				if (fp_operand.exponent == 0)
 				begin
-					// Any subnormal will overflow the exponent field, so convert to infinity.
+					// A subnormal will overflow the exponent field, so convert to infinity.
 					// This also handles division by zero.
-					reciprocal = { fp_operand.sign, 8'hff, 23'd0 }; // inf
+					reciprocal = {fp_operand.sign, 8'hff, 23'd0}; // inf
 				end
 				else if (fp_operand.exponent == 8'hff)
 				begin
 					if (fp_operand.significand != 0)
-						reciprocal = { 1'b0, 8'hff, 23'h7fffff }; // Division by NaN = NaN
+						reciprocal = {1'b0, 8'hff, 23'h7fffff}; // Division by NaN = NaN
 					else
-						reciprocal = { fp_operand.sign, 8'h00, 23'h000000 }; // Division by +/-inf = +/-0.0
+						reciprocal = {fp_operand.sign, 8'h00, 23'h000000}; // Division by +/-inf = +/-0.0
 				end
-				else 
+				else
 				begin
-					reciprocal = { fp_operand.sign, 8'd253 - fp_operand.exponent + 8'((fp_operand.significand[22:17] == 0)), 
-						reciprocal_estimate, {17{1'b0}} };
+					reciprocal = {fp_operand.sign, 8'd253 - fp_operand.exponent + 8'((fp_operand.significand[22:17] == 0)),
+						reciprocal_estimate, {17{1'b0}}};
 				end
 			end
 
@@ -203,7 +209,7 @@ module int_execute_stage(
 			begin
 				case (of_instruction.alu_op)
 					OP_ASHR,
-					OP_SHR: lane_result = rshift;	   
+					OP_SHR: lane_result = rshift;
 					OP_SHL: lane_result = lane_operand1 << lane_operand2[4:0];
 					OP_MOVE: lane_result = lane_operand2;
 					OP_OR: lane_result = lane_operand1 | lane_operand2;
@@ -211,42 +217,46 @@ module int_execute_stage(
 					OP_CTZ: lane_result = scalar_t'(tz);
 					OP_AND: lane_result = lane_operand1 & lane_operand2;
 					OP_XOR: lane_result = lane_operand1 ^ lane_operand2;
-					OP_ADD_I: lane_result = lane_operand1 + lane_operand2;	
+					OP_ADD_I: lane_result = lane_operand1 + lane_operand2;
 					OP_SUB_I: lane_result = difference;
-					OP_CMPEQ_I: lane_result = { {31{1'b0}}, zero };	  
-					OP_CMPNE_I: lane_result = { {31{1'b0}}, !zero }; 
-					OP_CMPGT_I: lane_result = { {31{1'b0}}, signed_gtr && !zero };
-					OP_CMPGE_I: lane_result = { {31{1'b0}}, signed_gtr || zero }; 
-					OP_CMPLT_I: lane_result = { {31{1'b0}}, !signed_gtr && !zero}; 
-					OP_CMPLE_I: lane_result = { {31{1'b0}}, !signed_gtr || zero };
-					OP_CMPGT_U: lane_result = { {31{1'b0}}, !borrow && !zero };
-					OP_CMPGE_U: lane_result = { {31{1'b0}}, !borrow || zero };
-					OP_CMPLT_U: lane_result = { {31{1'b0}}, borrow && !zero };
-					OP_CMPLE_U: lane_result = { {31{1'b0}}, borrow || zero };
-					OP_SEXT8: lane_result = { {24{lane_operand2[7]}}, lane_operand2[7:0] };
-					OP_SEXT16: lane_result = { {16{lane_operand2[15]}}, lane_operand2[15:0] };
+					OP_CMPEQ_I: lane_result = {{31{1'b0}}, zero};
+					OP_CMPNE_I: lane_result = {{31{1'b0}}, !zero};
+					OP_CMPGT_I: lane_result = {{31{1'b0}}, signed_gtr && !zero};
+					OP_CMPGE_I: lane_result = {{31{1'b0}}, signed_gtr || zero};
+					OP_CMPLT_I: lane_result = {{31{1'b0}}, !signed_gtr && !zero};
+					OP_CMPLE_I: lane_result = {{31{1'b0}}, !signed_gtr || zero};
+					OP_CMPGT_U: lane_result = {{31{1'b0}}, !borrow && !zero};
+					OP_CMPGE_U: lane_result = {{31{1'b0}}, !borrow || zero};
+					OP_CMPLT_U: lane_result = {{31{1'b0}}, borrow && !zero};
+					OP_CMPLE_U: lane_result = {{31{1'b0}}, borrow || zero};
+					OP_SEXT8: lane_result = {{24{lane_operand2[7]}}, lane_operand2[7:0]};
+					OP_SEXT16: lane_result = {{16{lane_operand2[15]}}, lane_operand2[15:0]};
 					OP_SHUFFLE,
 					OP_GETLANE: lane_result = of_operand1[~lane_operand2];
 					OP_RECIPROCAL: lane_result = reciprocal;
 					default: lane_result = 0;
 				endcase
 			end
-			
+
 			assign vector_result[lane] = lane_result;
 		end
 	endgenerate
-	
+
+	assign is_eret = of_instruction.is_branch && of_instruction.branch_type == BRANCH_ERET;
+	assign privileged_op_fault = is_eret && !cr_supervisor_en[of_thread_idx];
+
 	always_ff @(posedge clk, posedge reset)
 	begin
 		if (reset)
 		begin
 			ix_instruction <= 0;
-			
+
 			/*AUTORESET*/
 			// Beginning of autoreset for uninitialized flops
 			ix_instruction_valid <= '0;
 			ix_is_eret <= '0;
 			ix_mask_value <= '0;
+			ix_privileged_op_fault <= '0;
 			ix_result <= '0;
 			ix_rollback_en <= '0;
 			ix_rollback_pc <= '0;
@@ -262,8 +272,8 @@ module int_execute_stage(
 			ix_thread_idx <= of_thread_idx;
 			ix_subcycle <= of_subcycle;
 
-			if (of_instruction_valid 
-				&& (!wb_rollback_en || wb_rollback_thread_idx != of_thread_idx) 
+			if (of_instruction_valid
+				&& (!wb_rollback_en || wb_rollback_thread_idx != of_thread_idx)
 				&& of_instruction.pipeline_sel == PIPE_SCYCLE_ARITH)
 			begin
 				ix_instruction_valid <= 1;
@@ -274,24 +284,28 @@ module int_execute_stage(
 				unique case (of_instruction.branch_type)
 					BRANCH_CALL_REGISTER: ix_rollback_pc <= of_operand1[0];
 					BRANCH_ERET: ix_rollback_pc <= cr_eret_address[of_thread_idx];
-					default: 
+					default:
 						ix_rollback_pc <= of_instruction.pc + 4 + of_instruction.immediate_value;
-				endcase 
+				endcase
 
-				ix_is_eret <= of_instruction.is_branch && of_instruction.branch_type == BRANCH_ERET;
+				ix_is_eret <= is_eret && !privileged_op_fault;
+				ix_privileged_op_fault <= privileged_op_fault;
 
-				if (of_instruction.is_branch && !of_instruction.illegal
-					&& !of_instruction.ifetch_fault)
+				if (of_instruction.is_branch
+					&& !of_instruction.illegal
+					&& !of_instruction.ifetch_alignment_fault
+					&& !of_instruction.ifetch_supervisor_fault
+					&& !privileged_op_fault)
 				begin
 					unique case (of_instruction.branch_type)
 						BRANCH_ALL:            ix_rollback_en <= of_operand1[0][15:0] == 16'hffff;
 						BRANCH_ZERO:           ix_rollback_en <= of_operand1[0] == 0;
 						BRANCH_NOT_ZERO:       ix_rollback_en <= of_operand1[0] != 0;
 						BRANCH_NOT_ALL:        ix_rollback_en <= of_operand1[0][15:0] != 16'hffff;
-						BRANCH_ALWAYS,         
-						BRANCH_CALL_OFFSET,    
-						BRANCH_CALL_REGISTER,  
-						BRANCH_ERET:        ix_rollback_en <= 1'b1;
+						BRANCH_ALWAYS,
+						BRANCH_CALL_OFFSET,
+						BRANCH_CALL_REGISTER,
+						BRANCH_ERET:           ix_rollback_en <= 1'b1;
 					endcase
 				end
 				else

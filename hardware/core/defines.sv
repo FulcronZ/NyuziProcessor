@@ -1,18 +1,18 @@
-// 
+//
 // Copyright 2011-2015 Jeff Bush
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-// 
+//
 
 `ifndef __DEFINES_SV
 `define __DEFINES_SV
@@ -35,7 +35,7 @@ typedef logic[4:0] register_idx_t;
 typedef logic[$clog2(`VECTOR_LANES) - 1:0] subcycle_t;
 typedef logic[`VECTOR_LANES - 1:0] vector_lane_mask_t;
 
-`define NOP 32'd0
+`define INSTRUCTION_NOP 32'd0
 `define REG_RA (register_idx_t'(30))
 `define REG_PC (register_idx_t'(31))
 
@@ -46,8 +46,8 @@ typedef enum logic[5:0] {
 	OP_XOR			= 6'b000011,
 	OP_ADD_I		= 6'b000101,
 	OP_SUB_I		= 6'b000110,
-	OP_MULL_I		= 6'b000111,	// Multiply low	
-	OP_MULH_U		= 6'b001000,	// Unsigned multiply high 
+	OP_MULL_I		= 6'b000111,	// Multiply low
+	OP_MULH_U		= 6'b001000,	// Unsigned multiply high
 	OP_ASHR			= 6'b001001,	// Arithmetic shift right (sign extend)
 	OP_SHR			= 6'b001010,	// Logical shift right (no sign extend)
 	OP_SHL			= 6'b001011,	// Logical shift left
@@ -68,7 +68,7 @@ typedef enum logic[5:0] {
 	OP_GETLANE		= 6'b011010,	// Getlane
 	OP_FTOI			= 6'b011011,
 	OP_RECIPROCAL	= 6'b011100,	// Reciprocal estimate
-	OP_SEXT8		= 6'b011101,	
+	OP_SEXT8		= 6'b011101,
 	OP_SEXT16		= 6'b011110,
 	OP_MULH_I		= 6'b011111,	// Signed multiply high
 	OP_ADD_F		= 6'b100000,
@@ -80,7 +80,8 @@ typedef enum logic[5:0] {
 	OP_CMPGE_F		= 6'b101101,	// Floating point greater or equal
 	OP_CMPLE_F		= 6'b101111,	// Floating point less than or equal
 	OP_CMPEQ_F      = 6'b110000,	// Floating point equal
-	OP_CMPNE_F      = 6'b110001		// Floating point not-equal
+	OP_CMPNE_F      = 6'b110001,    // Floating point not-equal
+	OP_SYSCALL      = 6'b111111
 } alu_op_t;
 
 typedef enum logic[3:0] {
@@ -98,10 +99,14 @@ typedef enum logic[3:0] {
 } memory_op_t;
 
 typedef enum logic[2:0] {
-	CACHE_DINVALIDATE 	= 3'b001,
-	CACHE_DFLUSH		= 3'b010,
-	CACHE_IINVALIDATE	= 3'b011,
-	CACHE_MEMBAR		= 3'b100
+	CACHE_DTLB_INSERT   = 3'b000,
+	CACHE_DINVALIDATE   = 3'b001,
+	CACHE_DFLUSH        = 3'b010,
+	CACHE_IINVALIDATE   = 3'b011,
+	CACHE_MEMBAR        = 3'b100,
+	CACHE_TLB_INVAL     = 3'b101,
+	CACHE_TLB_INVAL_ALL = 3'b110,
+	CACHE_ITLB_INSERT   = 3'b111
 } cache_op_t;
 
 typedef enum logic[2:0] {
@@ -145,15 +150,29 @@ typedef enum logic [4:0] {
 	CR_FAULT_HANDLER = 5'd1,
 	CR_FAULT_PC = 5'd2,
 	CR_FAULT_REASON = 5'd3,
-	CR_FLAGS = 5'd4,	// Maybe stuff some other flags here eventually
+	CR_FLAGS = 5'd4,
 	CR_FAULT_ADDRESS = 5'd5,
-	CR_CYCLE_COUNT = 5'd6
+	CR_CYCLE_COUNT = 5'd6,
+	CR_TLB_MISS_HANDLER = 5'd7,
+	CR_SAVED_FLAGS = 5'd8,
+	CR_CURRENT_ASID = 5'd9,
+	CR_SCRATCHPAD0 = 5'd11,
+	CR_SCRATCHPAD1 = 5'd12,
+	CR_SUBCYCLE = 5'd13
 } control_register_t;
 
 typedef struct packed {
 	scalar_t pc;
 	logic illegal;
-	logic ifetch_fault;
+
+	// Piggybacked exceptions
+	logic ifetch_alignment_fault;
+	logic ifetch_supervisor_fault;
+	logic tlb_miss;
+	logic is_syscall;
+	logic interrupt_request;
+
+	// Decoded instruction fields
 	logic has_scalar1;
 	register_idx_t scalar_sel1;
 	logic has_scalar2;
@@ -179,7 +198,7 @@ typedef struct packed {
 	logic is_load;
 	logic is_compare;
 	subcycle_t last_subcycle;
-	control_register_t creg_index;  
+	control_register_t creg_index;
 	logic is_cache_control;
 	cache_op_t cache_control_op;
 } decoded_instruction_t;
@@ -187,9 +206,16 @@ typedef struct packed {
 typedef enum logic[3:0] {
 	FR_RESET,
 	FR_ILLEGAL_INSTRUCTION,
-	FR_INVALID_ACCESS,
+	FR_DATA_ALIGNMENT,
 	FR_INTERRUPT,
-	FR_IFETCH_FAULT
+	FR_IFETCH_ALIGNNMENT,
+	FR_ITLB_MISS,
+	FR_DTLB_MISS,
+	FR_ILLEGAL_WRITE,
+	FR_DATA_SUPERVISOR,
+	FR_IFETCH_SUPERVISOR,
+	FR_PRIVILEGED_OP,
+	FR_SYSCALL
 } fault_reason_t;
 
 `define IEEE754_B32_EXP_WIDTH 8
@@ -205,16 +231,33 @@ typedef struct packed {
 // Cache defines
 //
 
+`define PAGE_SIZE 'h1000
+`define PAGE_NUM_BITS (32 - $clog2(`PAGE_SIZE))
+`define ASID_WIDTH 8
 `define CACHE_LINE_BYTES (`VECTOR_LANES * 4) // Cache line must currently be same as vector width
 `define CACHE_LINE_BITS (`CACHE_LINE_BYTES * 8)
 `define CACHE_LINE_WORDS (`CACHE_LINE_BYTES / 4)
-`define CACHE_LINE_OFFSET_WIDTH $clog2(`CACHE_LINE_BYTES)	// Offset into a cache line
+`define CACHE_LINE_OFFSET_WIDTH $clog2(`CACHE_LINE_BYTES)	// Byte offset into a cache line
+`define ICACHE_TAG_BITS (32 - (`CACHE_LINE_OFFSET_WIDTH + $clog2(`L1I_SETS)))
+`define DCACHE_TAG_BITS (32 - (`CACHE_LINE_OFFSET_WIDTH + $clog2(`L1D_SETS)))
 
 typedef logic[`CACHE_LINE_BITS - 1:0] cache_line_data_t;
+typedef logic[`PAGE_NUM_BITS - 1:0] page_index_t;
+
+typedef struct packed {
+	logic[`PAGE_NUM_BITS - 1:0] ppage_idx;
+	logic[32 - (`PAGE_NUM_BITS + 5) - 1:0] unused;
+	logic global;
+	logic supervisor;
+	logic executable;
+	logic writable;
+	logic present;
+} tlb_entry_t;
 
 typedef logic[$clog2(`L1D_WAYS) - 1:0] l1d_way_idx_t;
 typedef logic[$clog2(`L1D_SETS) - 1:0] l1d_set_idx_t;
-typedef logic[(31 - (`CACHE_LINE_OFFSET_WIDTH + $clog2(`L1D_SETS))):0] l1d_tag_t;
+typedef logic[`DCACHE_TAG_BITS - 1:0] l1d_tag_t;
+
 typedef struct packed {
 	l1d_tag_t tag;
 	l1d_set_idx_t set_idx;
@@ -223,7 +266,8 @@ typedef struct packed {
 
 typedef logic[$clog2(`L1I_WAYS) - 1:0] l1i_way_idx_t;
 typedef logic[$clog2(`L1I_SETS) - 1:0] l1i_set_idx_t;
-typedef logic[(31 - (`CACHE_LINE_OFFSET_WIDTH + $clog2(`L1I_SETS))):0] l1i_tag_t;
+typedef logic[`ICACHE_TAG_BITS - 1:0] l1i_tag_t;
+
 typedef struct packed {
 	l1i_tag_t tag;
 	l1i_set_idx_t set_idx;
@@ -247,9 +291,11 @@ typedef enum logic {
 	CT_DCACHE
 } cache_type_t;
 
-`define CORE_ID_WIDTH 3
+`define CORE_ID_WIDTH $clog2(`NUM_CORES)
 
-typedef logic[`CORE_ID_WIDTH - 1:0] core_id_t;
+// The width for core ID is hardcoded because using $clog2 doesn't
+// work for one core. This limits to 16 cores.
+typedef logic[3:0] core_id_t;
 typedef logic[$clog2(`THREADS_PER_CORE) - 1:0] l1_miss_entry_idx_t;
 
 typedef enum logic[2:0] {
@@ -316,50 +362,50 @@ typedef enum logic[1:0] {
 
 // AMBA AXI-4 bus interface
 interface axi4_interface;
-	// Write address channel (Table A2-2)   
-	logic [31:0] m_awaddr;   
-	logic [7:0] m_awlen;    
+	// Write address channel (Table A2-2)
+	logic [31:0] m_awaddr;
+	logic [7:0] m_awlen;
 	logic [2:0] m_awsize;
 	axi_burst_type_t m_awburst;
 	logic [3:0] m_awcache;
-	logic m_awvalid;  
-	logic s_awready;  
+	logic m_awvalid;
+	logic s_awready;
 
 	// Write data channel (Table A2-3)
-	logic [`AXI_DATA_WIDTH - 1:0] m_wdata;    
+	logic [`AXI_DATA_WIDTH - 1:0] m_wdata;
 	logic [`AXI_DATA_WIDTH / 8 - 1:0] m_wstrb;
-	logic m_wlast;    
-	logic m_wvalid;   
-	logic s_wready;   
+	logic m_wlast;
+	logic m_wvalid;
+	logic s_wready;
 
 	// Write response channel (Table A2-4)
-	logic s_bvalid;   
-	logic m_bready;   
+	logic s_bvalid;
+	logic m_bready;
 
 	// Read address channel (Table A2-5)
-	logic [31:0] m_araddr;   
-	logic [7:0] m_arlen;    
+	logic [31:0] m_araddr;
+	logic [7:0] m_arlen;
 	logic [2:0] m_arsize;
 	axi_burst_type_t m_arburst;
 	logic [3:0] m_arcache;
-	logic m_arvalid;  
+	logic m_arvalid;
 	logic s_arready;
 
 	// Read data channel (Table A2-6)
-	logic [`AXI_DATA_WIDTH - 1:0] s_rdata;    
-	logic s_rvalid;   
-	logic m_rready;   
-	
+	logic [`AXI_DATA_WIDTH - 1:0] s_rdata;
+	logic s_rvalid;
+	logic m_rready;
+
 	modport master(input s_awready, s_wready, s_bvalid, s_arready, s_rvalid, s_rdata,
-		output m_awaddr, m_awlen, m_awvalid, m_wdata, m_wlast, m_wvalid, m_bready, m_araddr, m_arlen, 
+		output m_awaddr, m_awlen, m_awvalid, m_wdata, m_wlast, m_wvalid, m_bready, m_araddr, m_arlen,
 		m_arvalid, m_rready, m_awsize, m_awburst, m_wstrb, m_arsize, m_arburst, m_awcache, m_arcache);
-	modport slave(input m_awaddr, m_awlen, m_awvalid, m_wdata, m_wlast, m_wvalid, m_bready, m_araddr,  
-		m_arlen, m_arvalid, m_rready, m_awsize, m_awburst, m_wstrb, m_arsize, m_arburst, 
+	modport slave(input m_awaddr, m_awlen, m_awvalid, m_wdata, m_wlast, m_wvalid, m_bready, m_araddr,
+		m_arlen, m_arvalid, m_rready, m_awsize, m_awburst, m_wstrb, m_arsize, m_arburst,
 		m_awcache, m_arcache,
 		output s_awready, s_wready, s_bvalid, s_arready, s_rvalid, s_rdata);
 endinterface
 
-`define CORE_PERF_EVENTS 8	
+`define CORE_PERF_EVENTS 10
 `define L2_PERF_EVENTS 3
 `define TOTAL_PERF_EVENTS (`L2_PERF_EVENTS + `CORE_PERF_EVENTS * `NUM_CORES)
 

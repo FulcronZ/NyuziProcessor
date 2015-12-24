@@ -1,40 +1,40 @@
-// 
+//
 // Copyright 2011-2015 Jeff Bush
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-// 
+//
 
 `include "defines.sv"
 
 //
-// Contains vector and scalar register files and fetches values 
-// from them. This stage has two cycles of latency. In the first cycle,
-// the results are fetched from register memory: two scalar and two
-// vector ports.  In the second cycle, the appropriate results are selected
-// for the operands.
+// Contains vector and scalar register files and fetches values
+// from them. This stage has two cycles of latency. The first stage
+// fetches the results from register SRAM, which has one cycle of
+// latency. The second stage steers the register results to the
+// appropriate operand ports.
 //
 
 module operand_fetch_stage(
 	input                             clk,
 	input                             reset,
 
-	// From thread select stage
+	// From thread_select_stage
 	input                             ts_instruction_valid,
 	input decoded_instruction_t       ts_instruction,
 	input thread_idx_t                ts_thread_idx,
 	input subcycle_t                  ts_subcycle,
-	
-	// To execution units
+
+	// To fp_execute_stage1/int_execute_stage/dcache_tag_stage
 	output vector_t                   of_operand1,
 	output vector_t                   of_operand2,
 	output vector_lane_mask_t         of_mask_value,
@@ -44,11 +44,9 @@ module operand_fetch_stage(
 	output thread_idx_t               of_thread_idx,
 	output subcycle_t                 of_subcycle,
 
-	// From rollback stage
+	// From writeback_stage
 	input                             wb_rollback_en,
 	input thread_idx_t                wb_rollback_thread_idx,
-
-	// From writeback stage
 	input                             wb_writeback_en,
 	input thread_idx_t                wb_writeback_thread_idx,
 	input                             wb_writeback_is_vector,
@@ -67,7 +65,7 @@ module operand_fetch_stage(
 	subcycle_t cyc1_subcycle;
 
 	//
-	// Intermediate stage (cycle 1)
+	// Fetch register values (cycle 1)
 	//
 	sram_2r1w #(
 		.DATA_WIDTH($bits(scalar_t)),
@@ -75,10 +73,10 @@ module operand_fetch_stage(
 		.READ_DURING_WRITE("DONT_CARE")
 	) scalar_registers(
 		.read1_en(ts_instruction_valid && ts_instruction.has_scalar1),
-		.read1_addr({ ts_thread_idx, ts_instruction.scalar_sel1 }),
+		.read1_addr({ts_thread_idx, ts_instruction.scalar_sel1}),
 		.read1_data(scalar_val1),
 		.read2_en(ts_instruction_valid && ts_instruction.has_scalar2),
-		.read2_addr({ ts_thread_idx, ts_instruction.scalar_sel2 }),
+		.read2_addr({ts_thread_idx, ts_instruction.scalar_sel2}),
 		.read2_data(scalar_val2),
 		.write_en(wb_writeback_en && !wb_writeback_is_vector),
 		.write_addr({wb_writeback_thread_idx, wb_writeback_reg}),
@@ -95,10 +93,10 @@ module operand_fetch_stage(
 				.READ_DURING_WRITE("DONT_CARE")
 			) vector_registers (
 				.read1_en(ts_instruction.has_vector1),
-				.read1_addr({ ts_thread_idx, ts_instruction.vector_sel1 }),
+				.read1_addr({ts_thread_idx, ts_instruction.vector_sel1}),
 				.read1_data(vector_val1[lane]),
 				.read2_en(ts_instruction.has_vector2),
-				.read2_addr({ ts_thread_idx, ts_instruction.vector_sel2 }),
+				.read2_addr({ts_thread_idx, ts_instruction.vector_sel2}),
 				.read2_data(vector_val2[lane]),
 				.write_en(wb_writeback_en && wb_writeback_is_vector && wb_writeback_mask[lane]),
 				.write_addr({wb_writeback_thread_idx, wb_writeback_reg}),
@@ -113,22 +111,22 @@ module operand_fetch_stage(
 			cyc1_instruction_valid <= 0;
 		else
 		begin
-			cyc1_instruction_valid <= ts_instruction_valid 
+			cyc1_instruction_valid <= ts_instruction_valid
 				&& (!wb_rollback_en || wb_rollback_thread_idx != ts_thread_idx);
 		end
 	end
-	
+
 	always_ff @(posedge clk)
 	begin
 		cyc1_instruction <= ts_instruction;
 		cyc1_thread_idx <= ts_thread_idx;
 		cyc1_subcycle <= ts_subcycle;
 
-		// By convention, most processors use the current instruction address + 4 when 
+		// By convention, most processors use the current instruction address + 4 when
 		// the PC is read. It's kind of goofy, perhaps rethink this.
 		cyc1_adjusted_pc <= ts_instruction.pc + 4;
 	end
-	
+
 	//
 	// Output stage (cycle 2)
 	//
@@ -138,7 +136,7 @@ module operand_fetch_stage(
 			of_instruction_valid <= 0;
 		else
 		begin
-			of_instruction_valid <= cyc1_instruction_valid && (!wb_rollback_en 
+			of_instruction_valid <= cyc1_instruction_valid && (!wb_rollback_en
 				|| wb_rollback_thread_idx != cyc1_thread_idx);
 		end
 	end
@@ -154,7 +152,7 @@ module operand_fetch_stage(
 			OP1_SRC_PC:      of_operand1 <= {`VECTOR_LANES{cyc1_adjusted_pc}};
 			default:         of_operand1 <= {`VECTOR_LANES{scalar_val1}};	// OP_SRC_SCALAR1
 		endcase
-		
+
 		case (cyc1_instruction.op2_src)
 			OP2_SRC_SCALAR2: of_operand2 <= {`VECTOR_LANES{scalar_val2}};
 			OP2_SRC_PC:      of_operand2 <= {`VECTOR_LANES{cyc1_adjusted_pc}};
@@ -168,12 +166,13 @@ module operand_fetch_stage(
 			default:          of_mask_value <= {`VECTOR_LANES{1'b1}};	// MASK_SRC_ALL_ONES
 		endcase
 
-		of_store_value <= cyc1_instruction.store_value_is_vector 
+		of_store_value <= cyc1_instruction.store_value_is_vector
 			? vector_val2
-			: { {`VECTOR_LANES - 1{32'd0}}, scalar_val2 };
+			: {{`VECTOR_LANES - 1{32'd0}}, scalar_val2};
 	end
 endmodule
 
 // Local Variables:
 // verilog-typedef-regexp:"_t$"
+// verilog-auto-reset-widths:unbased
 // End:

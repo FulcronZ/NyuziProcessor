@@ -1,26 +1,27 @@
-// 
+//
 // Copyright 2011-2015 Jeff Bush
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-// 
+//
 
+#include <nyuzi.h>
 #include <schedule.h>
 #include <stdint.h>
 #include <stdio.h>
 
 //
-// This benchmark attempts to roughly simulate the workload of Bitcoin hashing, 
-// although I didn't bother to make it correct and many details are missing.  
+// This benchmark attempts to roughly simulate the workload of Bitcoin hashing,
+// although I didn't bother to make it correct and many details are missing.
 // It runs parallelized double SHA-256 hashes over a sequence of values.
 // Each thread performs 16 hashes in parallel (one per vector lane). With four
 // threads, there are 64 hashes running simultaneously.
@@ -92,7 +93,7 @@ void sha2Hash(vecu16_t pointers, int totalBlocks, vecu16_t outHashes)
 			w[index] = __builtin_nyuzi_gather_loadi(pointers);
 			pointers += __builtin_nyuzi_makevectori(4);
 		}
-	
+
 		for (int index = 16; index < 64; index++)
 	  		w[index] = SIG1(w[index - 2]) + w[index - 7] + SIG0(w[index - 15]) + w[index - 16];
 
@@ -104,7 +105,7 @@ void sha2Hash(vecu16_t pointers, int totalBlocks, vecu16_t outHashes)
 		vecu16_t f = h5;
 		vecu16_t g = h6;
 		vecu16_t h = h7;
-	
+
 		for (int round = 0; round < 64; round++)
 		{
 			vecu16_t temp1 = h + SIG1(e) + CH(e, f, g) + __builtin_nyuzi_makevectori(K[round]) + w[round];
@@ -118,7 +119,7 @@ void sha2Hash(vecu16_t pointers, int totalBlocks, vecu16_t outHashes)
 			b = a;
 			a = temp1 + temp2;
 		}
-		
+
 		h0 += a;
 		h1 += b;
 		h2 += c;
@@ -130,7 +131,7 @@ void sha2Hash(vecu16_t pointers, int totalBlocks, vecu16_t outHashes)
 	}
 
 	// doesn't add padding or length fields to end...
-	
+
 	__builtin_nyuzi_scatter_storei(outHashes, h0);
 	__builtin_nyuzi_scatter_storei(outHashes + __builtin_nyuzi_makevectori(4), h1);
 	__builtin_nyuzi_scatter_storei(outHashes + __builtin_nyuzi_makevectori(8), h2);
@@ -152,8 +153,8 @@ int main()
 	const int kHashSize = 32;
 	const int kNumBuffers = 2;
 	const int kNumLanes = 16;
-	
-	unsigned int basePtr = 0x100000 + __builtin_nyuzi_read_control_reg(0) * (kHashSize * kNumLanes * kNumBuffers)
+
+	unsigned int basePtr = 0x100000 + getCurrentThreadId() * (kHashSize * kNumLanes * kNumBuffers)
 		+ (kSourceBlockSize * kNumLanes);
 	const vecu16_t kStepVector = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
 	vecu16_t inputPtr = __builtin_nyuzi_makevectori(basePtr) + (kStepVector * __builtin_nyuzi_makevectori(kHashSize));
@@ -170,18 +171,18 @@ int main()
 	}
 
 	__sync_fetch_and_add(&gActiveThreadCount, -1);
-	if (__builtin_nyuzi_read_control_reg(0) == 0)
+	if (getCurrentThreadId() == 0)
 	{
 		while (gActiveThreadCount > 0)
 			;
 
-		int endTime = __builtin_nyuzi_read_control_reg(6);
+		int endTime = getCycleCount();
 		printf("%g cycles per hash\n", (float) endTime / 256);
 	}
 	else
 	{
 		while (1);
 	}
-	
+
 	return 0;
 }

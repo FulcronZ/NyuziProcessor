@@ -1,18 +1,18 @@
-// 
+//
 // Copyright 2011-2015 Jeff Bush
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-// 
+//
 
 
 //
@@ -26,19 +26,22 @@
 #include <schedule.h>
 #include <stdlib.h>
 #include <Texture.h>
+#include <vga.h>
 #include "TextureShader.h"
-#include "crate-texture.h"
+#include "test_texture.h"
 #include "cube.h"
 
 using namespace librender;
 
 const int kFbWidth = 640;
 const int kFbHeight = 480;
-	
+
 // All threads start execution here.
 int main()
 {
-	if (__builtin_nyuzi_read_control_reg(0) != 0)
+	if (__builtin_nyuzi_read_control_reg(0) == 0)
+		init_vga(VGA_MODE_640x480);
+	else
 		workerThread();
 
 	startAllThreads();
@@ -58,7 +61,7 @@ int main()
 	context->bindVertexAttrs(&kVertices);
 
 	Texture *texture = new Texture();
-	texture->setMipSurface(0, new Surface(512, 512, (void*) kCrateTexture));
+	texture->setMipSurface(0, new Surface(128, 128, (void*) kTestTexture));
 	texture->enableBilinearFiltering(true);
 	context->bindTexture(0, texture);
 
@@ -80,6 +83,6 @@ int main()
 		context->finish();
 		modelViewMatrix *= rotationMatrix;
 	}
-	
+
 	return 0;
 }

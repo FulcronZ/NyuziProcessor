@@ -1,35 +1,39 @@
-// 
+//
 // Copyright 2011-2015 Jeff Bush
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-// 
+//
 
 
 
 `include "defines.sv"
 
+//
+// Read only memory that uses AMBA AXI bus interface
+//
+
 module axi_rom
 	#(parameter FILENAME = "")
 
-	(input						clk,
-	input						reset,
-	
+	(input                      clk,
+	input                       reset,
+
 	// AXI interface
 	axi4_interface.slave        axi_bus);
 
 	localparam MAX_SIZE = 'h2000;
 
-	logic[31:0] burst_address;
+	logic[29:0] burst_address;
 	logic[7:0] burst_count;
 	logic burst_active;
 
@@ -37,7 +41,7 @@ module axi_rom
 
 	initial
 	begin
-		// This will synthesize memory with the appropriate initialization
+		// This is used during *synthesis* to load the contents of ROM memory.
 		$readmemh(FILENAME, rom_data);
 	end
 
@@ -58,13 +62,13 @@ module axi_rom
 			if (burst_count == 0 && axi_bus.m_rready)
 			begin
 				// End of burst
-				axi_bus.s_rvalid <= 0;	
+				axi_bus.s_rvalid <= 0;
 				burst_active <= 0;
 			end
 			else
 			begin
 				axi_bus.s_rvalid <= 1;
-				axi_bus.s_rdata <= rom_data[burst_address];
+				axi_bus.s_rdata <= rom_data[burst_address[$clog2(MAX_SIZE) - 1:0]];
 				if (axi_bus.m_rready)
 				begin
 					burst_address <= burst_address + 1;
@@ -83,6 +87,8 @@ module axi_rom
 endmodule
 
 // Local Variables:
+// verilog-library-flags:("-y ../../core" "-y ../../testbench")
 // verilog-typedef-regexp:"_t$"
+// verilog-auto-reset-widths:unbased
 // End:
 

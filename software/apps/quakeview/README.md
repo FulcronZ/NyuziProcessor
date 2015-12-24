@@ -12,13 +12,16 @@ Controls:
 - U/D keys: move camera up and down
 - w: toggle wireframe mode
 - b: toggle bilinear filtering
-- l: cycle lightmap mode: No lightmaps, Lightmaps, Lightmaps only, no texture
+- l: cycle lightmap mode: Texture only, lightmaps + texture, lightmaps only
 
 ## Running in Emulator
 
 To run in emulator, type:
 
     make run
+
+The default screen resolution is 640x480. To change this, update the variables
+FB_WIDTH and FB_HEIGHT in the Makefile.
 
 ## Running on FPGA
 
@@ -27,7 +30,7 @@ serial port into a ramdisk in memory. This will take a while. The repak utility
 can reduce the size of the PAK file. Instructions to build repak are at the top 
 of repak.cpp in this directory.
 
-    ./repak -o pak0.pak <original pak location> gfx/palette.lmp maps/e1m1.bsp ...
+    ./repak -o pak0.pak <original pak location> gfx/palette.lmp maps/e1m1.bsp <additional files>
 
 You can load other levels by changing this line in main.cpp:
 
@@ -41,9 +44,8 @@ make the following changes:
 1. At the bottom of the main loop in main.cpp, add a call to exit(). This exits the main
 loop and stops the worker threads:
 
-         		context->finish();
-         		printf("rendered frame in %d instructions\n", __builtin_nyuzi_read_control_reg(6) 
-         			- startInstructions);
+             context->finish();
+             printf("rendered frame in %d uS\n", clock() - time);
         +		exit(1);
          	}
  	

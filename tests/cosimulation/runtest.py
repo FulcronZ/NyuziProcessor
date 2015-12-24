@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
 # Copyright 2011-2015 Jeff Bush
 #
@@ -20,21 +20,18 @@ import subprocess
 import re
 import os
 from os import path
+import time
 
 sys.path.insert(0, '..')
 import test_harness
 
-if len(sys.argv) > 1:
-	files = sys.argv[1:]
-else:
-	files = [fname for fname in os.listdir('.') if fname.endswith(('.s'))]
 
 VERILATOR_MEM_DUMP='obj/vmem.bin'
 EMULATOR_MEM_DUMP='obj/mmem.bin'
 
 verilator_args = [
 	'../../bin/verilator_model',
-	'+regtrace',
+	'+trace',
 	'+simcycles=2000000',
 	'+memdumpfile=' + VERILATOR_MEM_DUMP,
 	'+memdumpbase=800000',
@@ -53,24 +50,37 @@ emulator_args = [
 	'obj/mmem.bin,0x800000,0x400000'
 ]
 
-if 'EMULATOR_DEBUG_ARGS' in os.environ:
-	emulator_args += [ os.environ['EMULATOR_DEBUG_ARGS'] ]
+verbose = 'VERBOSE' in os.environ
+if verbose:
+	emulator_args += [ '-v' ]
 
-for source_file in files:
-	print 'testing ' + source_file,
+def run_cosimulation_test(source_file):
+	global emulator_args
+	global verilator_args
+
 	hexfile = test_harness.assemble_test(source_file)
 	p1 = subprocess.Popen(verilator_args + [ '+bin=' + hexfile ], stdout=subprocess.PIPE)
 	p2 = subprocess.Popen(emulator_args + [ hexfile ], stdin=p1.stdout, stdout=subprocess.PIPE)
-	p1.stdout.close() # Allow P1 to receive SIGPIPE if p2 exits
+	output = ''
 	while True:
 		got = p2.stdout.read(0x1000)
 		if not got:
 			break
-			
-		print got
 
-	if not test_harness.assert_files_equal(VERILATOR_MEM_DUMP, EMULATOR_MEM_DUMP):
-		print "FAIL: simulator final memory contents do not match"
-		sys.exit(1)
-	else:
-		print 'PASS'
+		if verbose:
+			print(str(got))
+		else:
+			output += str(got)
+
+	p2.wait()
+	time.sleep(1)	# Give verilator a chance to clean up
+	p1.kill() 	# Make sure verilator has exited
+	if p2.returncode != 0:
+		raise test_harness.TestException('FAIL: cosimulation mismatch\n' + output)
+
+	test_harness.assert_files_equal(VERILATOR_MEM_DUMP, EMULATOR_MEM_DUMP,
+		'final memory contents to not match')
+
+test_harness.register_tests(run_cosimulation_test, test_harness.find_files(('.s', '.S')))
+
+test_harness.execute_tests()

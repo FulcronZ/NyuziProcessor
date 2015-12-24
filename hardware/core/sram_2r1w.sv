@@ -1,36 +1,36 @@
-// 
+//
 // Copyright 2011-2015 Jeff Bush
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-// 
+//
 
 //
-// Block SRAM with 2 read ports and 1 write port. 
-// Reads and writes are performed synchronously, with the value for a read 
-// appearing on the next clock edge after the address is asserted. 
-// The READ_DURING_WRITE parameter determine what happens if a read and a write 
-// are performed to the same address in the same cycle:
-//  "NEW_DATA" this will return the newly written data ("read-after-write").
-//  "DONT_CARE" The results are undefined. This can be used to improve clock 
-//  speed.
-//
+// Block SRAM with 2 read ports and 1 write port.
+// Reads and writes are performed synchronously. The read value appears
+// on the next clock edge after the address and readx_en are asserted
+// If readx_en is not asserted, the value of readx_data is undefined during
+// the next cycle. The READ_DURING_WRITE parameter determines what happens
+// if a read and a write are performed to the same address in the same cycle:
+//  - "NEW_DATA" this will return the newly written data ("read-after-write").
+//  - "DONT_CARE" The results are undefined. This can be used to improve clock
+//    speed.
 // This does not clear memory contents on reset.
 //
 
 module sram_2r1w
 	#(parameter DATA_WIDTH = 32,
 	parameter SIZE = 1024,
-	parameter READ_DURING_WRITE = "NEW_DATA",	
+	parameter READ_DURING_WRITE = "NEW_DATA",
 	parameter ADDR_WIDTH = $clog2(SIZE))
 
 	(input                           clk,
@@ -48,6 +48,9 @@ module sram_2r1w
 	logic[DATA_WIDTH - 1:0] data_from_ram1;
 	logic[DATA_WIDTH - 1:0] data_from_ram2;
 
+	// Not all Altera FPGA families support READ_DURING_WRITE_MIXED_PORTS
+	// (which I found out the hard way). I just set that to DONT_CARE and
+	// insert my own logic to bypass results.
 	ALTSYNCRAM #(
 		.OPERATION_MODE("DUAL_PORT"),
 		.WIDTH_A(DATA_WIDTH),
@@ -91,8 +94,8 @@ module sram_2r1w
 		.rden_b(read2_en),
 		.address_b(read2_addr),
 		.q_b(data_from_ram2));
-	
-	generate	
+
+	generate
 		if (READ_DURING_WRITE == "NEW_DATA")
 		begin
 			logic pass_thru1_en;
@@ -105,14 +108,14 @@ module sram_2r1w
 				pass_thru2_en <= write_en && read2_en && read2_addr == write_addr;
 				pass_thru_data <= write_data;
 			end
-			
-			assign read1_data = pass_thru1_en ? pass_thru_data : data_from_ram1; 
-			assign read2_data = pass_thru2_en ? pass_thru_data : data_from_ram2; 
+
+			assign read1_data = pass_thru1_en ? pass_thru_data : data_from_ram1;
+			assign read2_data = pass_thru2_en ? pass_thru_data : data_from_ram2;
 		end
 		else
 		begin
-			assign read1_data = data_from_ram1; 
-			assign read2_data = data_from_ram2; 
+			assign read1_data = data_from_ram1;
+			assign read2_data = data_from_ram2;
 		end
 	endgenerate
 `elsif MEMORY_COMPILER
@@ -128,7 +131,7 @@ module sram_2r1w
 	always_ff @(posedge clk)
 	begin
 		if (write_en)
-			data[write_addr] <= write_data;	
+			data[write_addr] <= write_data;
 
 		if (write_addr == read1_addr && write_en && read1_en)
 		begin
@@ -139,6 +142,8 @@ module sram_2r1w
 		end
 		else if (read1_en)
 			read1_data <= data[read1_addr];
+		else
+			read1_data <= {DATA_WIDTH{1'bx}};
 
 		if (write_addr == read2_addr && write_en && read2_en)
 		begin
@@ -149,12 +154,13 @@ module sram_2r1w
 		end
 		else if (read2_en)
 			read2_data <= data[read2_addr];
+		else
+			read2_data <= {DATA_WIDTH{1'bx}};
 	end
 
 	initial
 	begin
-		int dumpmems;
-		if ($value$plusargs("dumpmems=%d", dumpmems) != 0)
+		if ($test$plusargs("dumpmems") != 0)
 			$display("sram2r1w %d %d", DATA_WIDTH, SIZE);
 	end
 `endif
@@ -162,5 +168,6 @@ endmodule
 
 // Local Variables:
 // verilog-typedef-regexp:"_t$"
+// verilog-auto-reset-widths:unbased
 // End:
 

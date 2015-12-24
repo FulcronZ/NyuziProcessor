@@ -1,52 +1,52 @@
-// 
+//
 // Copyright 2011-2015 Jeff Bush
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-// 
+//
 
 #include "protocol.h"
 
 //
 // First stage serial bootloader. This is synthesized into ROM in high memory
-// in the FPGA configuration. It supports a simple protocol that allows 
-// loading a program into memory. It communicates with a host side loader in 
-// tool/serial_boot.
+// on FPGA. It communicates with a loader program on the host (tools/serial_boot),
+// which loads a program into memory. Because this is running in ROM, it cannot
+// use global variables.
 //
 
-volatile unsigned int * const LED_BASE = (volatile unsigned int*) 0xFFFF0000;
-volatile unsigned int * const UART_BASE = (volatile unsigned int*) 0xFFFF0018;
-	
-enum UartRegs
+static volatile unsigned int * const REGISTERS = (volatile unsigned int*) 0xffff0000;
+
+enum register_index
 {
-	kStatus = 0,
-	kRx = 1,
-	kTx = 2
+	REG_RED_LED             = 0x0000 / 4,
+	REG_UART_STATUS         = 0x0018 / 4,
+	REG_UART_RX             = 0x001c / 4,
+	REG_UART_TX             = 0x0020 / 4,
 };
 
 unsigned int read_serial_byte(void)
 {
-	while ((UART_BASE[kStatus] & 2) == 0)	
+	while ((REGISTERS[REG_UART_STATUS] & 2) == 0)
 		;
-	
-	return UART_BASE[kRx];
+
+	return REGISTERS[REG_UART_RX];
 }
 
 void write_serial_byte(unsigned int ch)
 {
-	while ((UART_BASE[kStatus] & 1) == 0)	// Wait for ready
+	while ((REGISTERS[REG_UART_STATUS] & 1) == 0)	// Wait for ready
 		;
-	
-	UART_BASE[kTx] = ch;
+
+	REGISTERS[REG_UART_TX] = ch;
 }
 
 unsigned int read_serial_long(void)
@@ -80,7 +80,7 @@ void *memset(void *_dest, int value, unsigned int length)
 			*((unsigned int*) dest) = wideVal;
 			dest += 4;
 			length -= 4;
-		}		
+		}
 	}
 
 	// Write one byte at a time
@@ -89,64 +89,63 @@ void *memset(void *_dest, int value, unsigned int length)
 		*dest++ = value;
 		length--;
 	}
-	
-	return _dest;	
+
+	return _dest;
 }
 
 int main()
 {
-	LED_BASE[0] = 0x1;	// Turn on LED
-	
+	// Turn on red LED to indicate bootloader is waiting
+	REGISTERS[REG_RED_LED] = 0x1;
+
 	for (;;)
 	{
 		switch (read_serial_byte())
 		{
 			case LOAD_MEMORY_REQ:
 			{
-				unsigned int baseAddress = read_serial_long();
+				unsigned int base_address = read_serial_long();
 				unsigned int length = read_serial_long();
 
 				// Compute fletcher checksum of data
 				unsigned int checksuma = 0;
 				unsigned int checksumb = 0;
-				
+
 				for (int i = 0; i < length; i++)
 				{
 					unsigned int ch = read_serial_byte();
 					checksuma += ch;
 					checksumb += checksuma;
-					((unsigned char*) baseAddress)[i] = ch;
+					((unsigned char*) base_address)[i] = ch;
 				}
 
 				write_serial_byte(LOAD_MEMORY_ACK);
 				write_serial_long((checksuma & 0xffff) | ((checksumb & 0xffff) << 16));
 				break;
 			}
-			
+
 			case CLEAR_MEMORY_REQ:
 			{
-				unsigned int baseAddress = read_serial_long();
+				unsigned int base_address = read_serial_long();
 				unsigned int length = read_serial_long();
-				memset((char*) 0 + baseAddress, 0, length);
+				memset((char*) 0 + base_address, 0, length);
 				write_serial_byte(CLEAR_MEMORY_ACK);
 				break;
 			}
-			
+
 			case EXECUTE_REQ:
 			{
-				LED_BASE[0] = 0;	// Turn off LED
+				REGISTERS[REG_RED_LED] = 0;	// Turn off LED
 				write_serial_byte(EXECUTE_ACK);
 				return 0;	// Break out of main
 			}
-			
+
 			case PING_REQ:
 				write_serial_byte(PING_ACK);
 				break;
-			
+
 			default:
 				write_serial_byte(BAD_COMMAND);
 		}
 	}
 }
-
-

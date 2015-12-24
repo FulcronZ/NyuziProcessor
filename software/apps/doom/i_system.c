@@ -1,4 +1,4 @@
-// Emacs style mode select	 -*- C++ -*- 
+// Emacs style mode select	 -*- C++ -*-
 //-----------------------------------------------------------------------------
 //
 // $Id:$
@@ -29,6 +29,7 @@ rcsid[] = "$Id: m_bbox.c,v 1.1 1997/02/03 22:45:10 b1 Exp $";
 #include <string.h>
 
 #include <stdarg.h>
+#include <time.h>
 
 #include "doomdef.h"
 #include "m_misc.h"
@@ -85,11 +86,9 @@ byte* I_ZoneBase (int*	size)
 // XXX there will be a discontinuity after 35 minutes
 //
 
-#define CLOCKS_PER_TICK (50000000 / 70)
-
 int	 I_GetTime (void)
 {
-	return __builtin_nyuzi_read_control_reg(6) / CLOCKS_PER_TICK;
+	return clock() / (CLOCKS_PER_SEC / 70);
 }
 
 //
@@ -129,7 +128,7 @@ void I_EndRead(void)
 byte*	I_AllocLow(int length)
 {
 	byte*		mem;
-		
+
 	mem = (byte *)malloc (length);
 	memset (mem,0,length);
 	return mem;
@@ -159,6 +158,6 @@ void I_Error (char *error, ...)
 
 	D_QuitNetGame ();
 	I_ShutdownGraphics();
-	
+
 	exit(-1);
 }

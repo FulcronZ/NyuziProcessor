@@ -1,18 +1,18 @@
-// 
+//
 // Copyright 2011-2015 Jeff Bush
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-// 
+//
 
 `include "defines.sv"
 
@@ -42,7 +42,7 @@ module io_arbiter(
 	core_id_t request_core;
 	thread_idx_t request_thread_idx;
 	ioreq_packet_t grant_request;
-	
+
 	genvar request_idx;
 	generate
 		for (request_idx = 0; request_idx < `NUM_CORES; request_idx++)
@@ -63,9 +63,9 @@ module io_arbiter(
 
 			oh_to_idx #(.NUM_SIGNALS(`NUM_CORES)) oh_to_idx_grant(
 				.one_hot(grant_oh),
-				.index(grant_idx));
-				
-			assign grant_request = io_request[grant_idx];
+				.index(grant_idx[`CORE_ID_WIDTH - 1:0]));
+
+			assign grant_request = io_request[grant_idx[`CORE_ID_WIDTH - 1:0]];
 		end
 		else
 		begin
@@ -79,13 +79,27 @@ module io_arbiter(
 	assign io_read_en = |grant_oh && !grant_request.is_store;
 	assign io_write_data = grant_request.value;
 	assign io_address = grant_request.address;
-		
+
 	always_ff @(posedge clk, posedge reset)
 	begin
 		if (reset)
 		begin
-			request_sent <= 0;
-			ia_response <= 0;
+			ia_response <= '0;
+
+			`ifdef NEVER
+			// Suppress AUTORESET
+			ia_response.core <= '0;
+			ia_response.read_value <= '0;
+			ia_response.thread_idx <= '0;
+			ia_response.valid <= '0;
+			`endif
+
+			/*AUTORESET*/
+			// Beginning of autoreset for uninitialized flops
+			request_core <= '0;
+			request_sent <= '0;
+			request_thread_idx <= '0;
+			// End of automatics
 		end
 		else
 		begin
@@ -98,7 +112,7 @@ module io_arbiter(
 			end
 			else
 				request_sent <= 0;
-			
+
 			if (request_sent)
 			begin
 				// Next cycle after request, record response
@@ -115,6 +129,7 @@ endmodule
 
 // Local Variables:
 // verilog-typedef-regexp:"_t$"
+// verilog-auto-reset-widths:unbased
 // End:
 
 

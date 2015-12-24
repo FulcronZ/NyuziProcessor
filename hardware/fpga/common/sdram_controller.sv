@@ -1,29 +1,27 @@
-// 
+//
 // Copyright 2011-2015 Jeff Bush
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-// 
+//
 
 
 `include "defines.sv"
 
-`define SDRAM_ADDR_WIDTH 13
-
 //
-// Drive control signals for single data rate (SDR) SDRAM, including
+// Drives control signals for single data rate (SDR) SDRAM, including
 // auto refresh at appropriate intervals. An AXI bus interface initiates
 // reads and writes.
-// For performance, this lazily keeps rows open after accesses, tracking them 
+// For performance, this lazily keeps rows open after accesses, tracking them
 // independently for each bank and closing them only when necessary.
 //
 
@@ -31,34 +29,34 @@ module sdram_controller
 	#(parameter					          DATA_WIDTH = 32,
 	parameter					          ROW_ADDR_WIDTH = 12, // 4096 rows
 	parameter					          COL_ADDR_WIDTH = 8, // 256 columns
-	
+
 	// These are expressed in numbers of clocks. Each one is the number
-	// of clocks of delay minus one.  Need to compute this
-	// based on the part specifications and incoming clock rate.
+	// of clocks of delay minus one. Need to compute this by dividing
+	// part specification by clock interval.
 	parameter					          T_POWERUP = 10000,
 	parameter					          T_ROW_PRECHARGE = 1,
 	parameter					          T_AUTO_REFRESH_CYCLE = 3,
 	parameter					          T_RAS_CAS_DELAY = 1,
 	parameter					          T_REFRESH = 750,
-	parameter					          T_CAS_LATENCY = 1)	
-	                                      
+	parameter					          T_CAS_LATENCY = 1)
+
 	(input						          clk,
 	input						          reset,
-	
-	// Interface to SDRAM	
+
+	// Interface to SDRAM
 	output						          dram_clk,
-	output 						          dram_cke, 
-	output 						          dram_cs_n, 
-	output 						          dram_ras_n, 
-	output 						          dram_cas_n, 
+	output 						          dram_cke,
+	output 						          dram_cs_n,
+	output 						          dram_ras_n,
+	output 						          dram_cas_n,
 	output 						          dram_we_n,
 	output logic[1:0]			          dram_ba,
-	output logic[`SDRAM_ADDR_WIDTH - 1:0] dram_addr,
+	output logic[12:0]                    dram_addr,
 	inout [DATA_WIDTH - 1:0]	          dram_dq,
-	
-	// Interface to bus	
+
+	// Interface to bus
 	axi4_interface.slave                  axi_bus,
-	
+
 	// Performance counter events
 	output logic				          pc_event_dram_page_miss,
 	output logic				          pc_event_dram_page_hit);
@@ -66,26 +64,27 @@ module sdram_controller
 	localparam SDRAM_BURST_LENGTH = 8;
 	localparam SDRAM_BURST_IDX_WIDTH = $clog2(SDRAM_BURST_LENGTH);
 	localparam NUM_BANKS = 4;
-	localparam MEMORY_SIZE = (1 << (ROW_ADDR_WIDTH + COL_ADDR_WIDTH)) * NUM_BANKS 
+	localparam MEMORY_SIZE = (1 << (ROW_ADDR_WIDTH + COL_ADDR_WIDTH)) * NUM_BANKS
 		* (DATA_WIDTH / 8);
 	localparam INTERNAL_ADDR_WIDTH = ROW_ADDR_WIDTH + COL_ADDR_WIDTH + $clog2(NUM_BANKS);
-	
+	localparam SDRAM_ADDR_WIDTH = $size(dram_addr);
+
 	typedef enum {
-		STATE_INIT0,	
-		STATE_INIT1,	
-		STATE_INIT2,	
-		STATE_INIT3,	
+		STATE_INIT0,
+		STATE_INIT1,
+		STATE_INIT2,
+		STATE_INIT3,
 		STATE_IDLE,
 		STATE_AUTO_REFRESH0,
 		STATE_AUTO_REFRESH1,
 		STATE_OPEN_ROW,
 		STATE_READ_BURST,
 		STATE_WRITE_BURST,
-		STATE_CAS_WAIT,	
+		STATE_CAS_WAIT,
 		STATE_POWERUP,
 		STATE_CLOSE_ROW
 	} burst_state_t;
-	
+
 	typedef enum logic[3:0] {
 		CMD_MODE_REGISTER_SET = 4'b0000,
 		CMD_AUTO_REFRESH      = 4'b0001,
@@ -93,11 +92,10 @@ module sdram_controller
 		CMD_ACTIVATE          = 4'b0011,
 		CMD_WRITE             = 4'b0100,
 		CMD_READ              = 4'b0101,
-		CMD_NOP               = 4'b1000	
+		CMD_NOP               = 4'b1000
 	} sdram_cmd_t;
-	
-	// Note that all latched addresses and lengths are in terms of
-	// DATA_WIDTH beats, not bytes.
+
+	// latched addresses and lengths are in terms of DATA_WIDTH beats, not bytes.
 	logic[11:0] refresh_timer_ff;
 	logic[11:0] refresh_timer_nxt;
 	logic[14:0] timer_ff;
@@ -110,21 +108,21 @@ module sdram_controller
 	logic[ROW_ADDR_WIDTH - 1:0] active_row[NUM_BANKS];
 	logic bank_active[NUM_BANKS];
 	logic output_enable;
-	wire[DATA_WIDTH - 1:0] write_data;
+	logic[DATA_WIDTH - 1:0] write_data;
 	logic[INTERNAL_ADDR_WIDTH - 1:0] write_address;
-	logic[7:0] write_length;	// Like axi_bus.m_awlen, is num transfers - 1
+	logic[7:0] write_length; // Like axi_bus.m_awlen, is num transfers - 1
 	logic write_pending;
 	logic[INTERNAL_ADDR_WIDTH - 1:0] read_address;
 	logic[7:0] read_length;	// Like axi_bus.m_arlen, is num_transfers - 1
 	logic read_pending;
-	wire lfifo_empty;
-	wire sfifo_full;
-	wire[$clog2(NUM_BANKS) - 1:0] write_bank;
-	wire[COL_ADDR_WIDTH - 1:0] write_column;
-	wire[ROW_ADDR_WIDTH - 1:0] write_row;
-	wire[$clog2(NUM_BANKS) - 1:0] read_bank;
-	wire[COL_ADDR_WIDTH - 1:0] read_column;
-	wire[ROW_ADDR_WIDTH - 1:0] read_row;
+	logic lfifo_empty;
+	logic sfifo_full;
+	logic[$clog2(NUM_BANKS) - 1:0] write_bank;
+	logic[COL_ADDR_WIDTH - 1:0] write_column;
+	logic[ROW_ADDR_WIDTH - 1:0] write_row;
+	logic[$clog2(NUM_BANKS) - 1:0] read_bank;
+	logic[COL_ADDR_WIDTH - 1:0] read_column;
+	logic[ROW_ADDR_WIDTH - 1:0] read_row;
 	logic lfifo_enqueue;
 	logic access_is_read_ff;
 	logic access_is_read_nxt;
@@ -163,20 +161,19 @@ module sdram_controller
 		.value_i(axi_bus.m_wdata),
 		.enqueue_en(axi_bus.s_wready && axi_bus.m_wvalid),
 		.empty());
-	
-	assign { dram_cs_n, dram_ras_n, dram_cas_n, dram_we_n } = command;
+
+	assign {dram_cs_n, dram_ras_n, dram_cas_n, dram_we_n} = command;
 	assign dram_cke = 1;
 	assign dram_clk = clk;
-	assign { write_row, write_bank, write_column } = write_address;
-	assign { read_row, read_bank, read_column } = read_address;
-		
+	assign {write_row, write_bank, write_column} = write_address;
+	assign {read_row, read_bank, read_column} = read_address;
+
 	assign dram_dq = output_enable ? write_data : {DATA_WIDTH{1'hZ}};
-	
-	// Next state logic.  There are many cases where we want to delay between
-	// states. In this case, timer_ff tracks how many cycles are remaining.
-	// It is important to note that state_ff will point to the next state during
-	// this interval, but the control signals associated with the state (in the case
-	// below) won't be asserted until the timer counts down to zero.
+
+	// Next state logic. When there is a delay between states, timer_ff tracks
+	// how many cycles are remaining. state_ff will point to the *next* state
+	// during this interval, but the  control signals associated with the state
+	// (in the case below) won't be asserted until the timer counts down to zero.
 	always_comb
 	begin
 		// Default values
@@ -198,7 +195,7 @@ module sdram_controller
 			refresh_timer_nxt = 0;
 
 		if (timer_ff != 0)
-			timer_nxt = timer_ff - 15'd1; // Wait for timer to expire...
+			timer_nxt = timer_ff - 15'd1; // Wait for timer to expire
 		else
 		begin
 			// Progress to next state.
@@ -208,42 +205,43 @@ module sdram_controller
 					timer_nxt = T_POWERUP;	// Wait for clock to be stable
 					state_nxt = STATE_INIT0;
 				end
-			
+
 				STATE_INIT0:
 				begin
 					// Step 1: send precharge all command
-					dram_addr = {`SDRAM_ADDR_WIDTH{1'b1}};
+					dram_addr = {SDRAM_ADDR_WIDTH{1'b1}};
 					command = CMD_PRECHARGE;
 					timer_nxt = T_ROW_PRECHARGE;
 					state_nxt = STATE_INIT1;
 				end
-			
+
 				STATE_INIT1:
 				begin
 					// Step 2: send two auto refresh commands
-					dram_addr = {`SDRAM_ADDR_WIDTH{1'b1}};
+					dram_addr = {SDRAM_ADDR_WIDTH{1'b1}};
 					command = CMD_AUTO_REFRESH;
-					timer_nxt = T_AUTO_REFRESH_CYCLE; 
+					timer_nxt = T_AUTO_REFRESH_CYCLE;
 					state_nxt = STATE_INIT2;
 				end
-				
+
 				STATE_INIT2:
 				begin
-					dram_addr = {`SDRAM_ADDR_WIDTH{1'b1}};
+					dram_addr = {SDRAM_ADDR_WIDTH{1'b1}};
 					command = CMD_AUTO_REFRESH;
-					timer_nxt = T_AUTO_REFRESH_CYCLE; 
+					timer_nxt = T_AUTO_REFRESH_CYCLE;
 					state_nxt = STATE_INIT3;
 				end
-			
+
 				STATE_INIT3:
 				begin
 					// Step 3: set the mode register
+					// CAS latency is hardcoded to 2 clocks
 					command = CMD_MODE_REGISTER_SET;
-					dram_addr = `SDRAM_ADDR_WIDTH'b000_0_00_010_0_011;	// Note: CAS latency is 2
+					dram_addr = SDRAM_ADDR_WIDTH'('b000_0_00_010_0_011);
 					dram_ba = 2'b00;
 					state_nxt = STATE_IDLE;
 				end
-				
+
 				STATE_IDLE:
 				begin
 					if (refresh_timer_ff == 0)
@@ -256,47 +254,53 @@ module sdram_controller
 						else
 							state_nxt = STATE_AUTO_REFRESH1;
 					end
-					else if (lfifo_empty && read_pending 
+					else if (lfifo_empty && read_pending
 						&& (!write_pending || write_address != read_address))
 					begin
 						// Start a read burst. Reads have priority to avoid starving
-						// the VGA controller, but we check above to ensure there isn't 
-						// a write already pending for this address (otherwise we will 
+						// the VGA controller, but we check above to ensure there isn't
+						// a write already pending for this address (otherwise we will
 						// get stale data).
 						access_is_read_nxt = 1;
 						if (!bank_active[read_bank])
 						begin
+							// Row is not open in this bank, need to pen it.
 							pc_event_dram_page_miss = 1;
-							state_nxt = STATE_OPEN_ROW;	// Row is not open, do that
+							state_nxt = STATE_OPEN_ROW;
 						end
-						else if (read_row != active_row[read_bank])	
+						else if (read_row != active_row[read_bank])
 						begin
+							// Different row is already open in this bank, close it first.
 							pc_event_dram_page_miss = 1;
-							state_nxt = STATE_CLOSE_ROW; // Different row open in this bank, close
+							state_nxt = STATE_CLOSE_ROW;
 						end
 						else
 						begin
 							pc_event_dram_page_hit = 1;
-							state_nxt = STATE_CAS_WAIT;			
+							state_nxt = STATE_CAS_WAIT;
 						end
 					end
-					else if (write_pending && sfifo_full 
+					else if (write_pending && sfifo_full
 						&& (!read_pending || write_address == read_address))
 					begin
-						// Start a write burst.  
-						// We don't start the burst if a read is pending and the FIFO is full.
-						// This is a hack to avoid starving the VGA controller.  However, do 
-						// start the write if the read is for data we are about to write.
+						// Start a write burst.
+						// Don't start the burst if a read is pending and the FIFO is full.
+						// This is a hack to avoid starving the VGA controller.  However, do
+						// start the write if the read is for data we are about to write
+						// (write_address == read_address above), which avoids a nasty race
+						// condition that corrrupts data.
 						access_is_read_nxt = 0;
 						if (!bank_active[write_bank])
 						begin
+							// Row is not open, do that
 							pc_event_dram_page_miss = 1;
-							state_nxt = STATE_OPEN_ROW;	// Row is not open, do that
+							state_nxt = STATE_OPEN_ROW;
 						end
-						else if (write_row != active_row[write_bank])	
+						else if (write_row != active_row[write_bank])
 						begin
+							// Different row open in this bank, close
 							pc_event_dram_page_miss = 1;
-							state_nxt = STATE_CLOSE_ROW; // Different row open in this bank, close
+							state_nxt = STATE_CLOSE_ROW;
 						end
 						else
 						begin
@@ -310,45 +314,45 @@ module sdram_controller
 				begin
 					// Precharge a single bank that has an open row in preparation
 					// for a transfer.
-					dram_addr =  {`SDRAM_ADDR_WIDTH{1'b0}};
+					dram_addr =  {SDRAM_ADDR_WIDTH{1'b0}};
 					if (access_is_read_ff)
 						dram_ba = read_bank;
 					else
 						dram_ba = write_bank;
-					
+
 					command = CMD_PRECHARGE;
 					timer_nxt = T_ROW_PRECHARGE;
 					state_nxt = STATE_OPEN_ROW;
 				end
-				
+
 				STATE_OPEN_ROW:
 				begin
 					// Open a row
 					if (access_is_read_ff)
 					begin
 						dram_ba = read_bank;
-						dram_addr = `SDRAM_ADDR_WIDTH'(read_row);
+						dram_addr = SDRAM_ADDR_WIDTH'(read_row);
 						state_nxt = STATE_CAS_WAIT;
 					end
 					else
 					begin
 						dram_ba = write_bank;
-						dram_addr = `SDRAM_ADDR_WIDTH'(write_row);
+						dram_addr = SDRAM_ADDR_WIDTH'(write_row);
 						state_nxt = STATE_WRITE_BURST;
 					end
 					command = CMD_ACTIVATE;
 					timer_nxt = T_RAS_CAS_DELAY;
 				end
-				
+
 				STATE_CAS_WAIT:
 				begin
 					command = CMD_READ;
-					dram_addr = `SDRAM_ADDR_WIDTH'(read_column);
+					dram_addr = SDRAM_ADDR_WIDTH'(read_column);
 					dram_ba = read_bank;
 					timer_nxt = T_CAS_LATENCY;
 					state_nxt = STATE_READ_BURST;
 				end
-				
+
 				STATE_READ_BURST:
 				begin
 					lfifo_enqueue = 1;
@@ -356,7 +360,7 @@ module sdram_controller
 					if (burst_offset_ff == SDRAM_BURST_IDX_WIDTH'(SDRAM_BURST_LENGTH - 1))
 						state_nxt = STATE_IDLE;
 				end
-				
+
 				STATE_WRITE_BURST:
 				begin
 					output_enable = 1;
@@ -364,8 +368,8 @@ module sdram_controller
 					begin
 						// On first cycle
 						dram_ba = write_bank;
-						dram_addr = `SDRAM_ADDR_WIDTH'(write_column);
-						command = CMD_WRITE;	
+						dram_addr = SDRAM_ADDR_WIDTH'(write_column);
+						command = CMD_WRITE;
 					end
 
 					burst_offset_nxt = burst_offset_ff + 1;
@@ -375,8 +379,8 @@ module sdram_controller
 
 				STATE_AUTO_REFRESH0:
 				begin
-					// Precharge all banks before we perform an auto-refresh
-					dram_addr = `SDRAM_ADDR_WIDTH'b0010000000000;		// XXX parameterize
+					// Precharge all banks before auto-refresh
+					dram_addr = SDRAM_ADDR_WIDTH'('b0010000000000);	// XXX parameterize
 					command = CMD_PRECHARGE;
 					timer_nxt = T_ROW_PRECHARGE;
 					state_nxt = STATE_AUTO_REFRESH1;
@@ -405,7 +409,7 @@ module sdram_controller
 
 			state_ff <= STATE_INIT0;
 			refresh_timer_ff <= T_REFRESH;
-			
+
 			access_is_read_ff <= '0;
 			burst_offset_ff <= '0;
 			read_address <= '0;
@@ -443,12 +447,12 @@ module sdram_controller
 				for (int i = 0; i < NUM_BANKS; i++)
 					bank_active[i] <= 0;
 			end
-			
+
 			// Bus Interface
 			if (write_pending && state_ff == STATE_WRITE_BURST &&
 				state_nxt != STATE_WRITE_BURST)
 			begin
-				// The bus transfer may be longer than the SDRAM burst.  
+				// The bus transfer may be longer than the SDRAM burst.
 				// Determine if we are done yet.
 				write_length <= write_length - SDRAM_BURST_LENGTH;
 				write_address <= write_address + SDRAM_BURST_LENGTH;
@@ -460,7 +464,7 @@ module sdram_controller
 				// Ensure the the burst is aligned on an SDRAM burst boundary.
 				assert(((axi_bus.m_awlen + 1) & (SDRAM_BURST_LENGTH - 1)) == 0);
 				assert((axi_bus.m_awaddr & (SDRAM_BURST_LENGTH - 1)) == 0);
-				
+
 				// Make sure memory address is in memory range
 				if (axi_bus.m_awaddr >= MEMORY_SIZE)
 				begin
@@ -479,7 +483,7 @@ module sdram_controller
 			begin
 				read_length <= read_length - SDRAM_BURST_LENGTH;
 				read_address <= read_address + SDRAM_BURST_LENGTH;
-				if (read_length == SDRAM_BURST_LENGTH - 1) 
+				if (read_length == SDRAM_BURST_LENGTH - 1)
 					read_pending <= 0;
 			end
 			else if (axi_bus.m_arvalid && !read_pending)
@@ -506,4 +510,8 @@ module sdram_controller
 	end
 endmodule
 
-
+// Local Variables:
+// verilog-library-flags:("-y ../../core" "-y ../../testbench")
+// verilog-typedef-regexp:"_t$"
+// verilog-auto-reset-widths:unbased
+// End:

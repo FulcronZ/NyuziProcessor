@@ -1,18 +1,18 @@
-// 
+//
 // Copyright 2015 Jeff Bush
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-// 
+//
 
 #ifndef __INSTRUCTION_SET_H
 #define __INSTRUCTION_SET_H
@@ -20,6 +20,10 @@
 #define LINK_REG 30
 #define PC_REG 31
 #define INSTRUCTION_NOP 0
+
+#define TLB_WRITE_ENABLE 2
+#define TLB_SUPERVISOR 8
+#define TLB_GLOBAL 16
 
 enum _ArithmeticOp
 {
@@ -62,7 +66,8 @@ enum _ArithmeticOp
 	OP_CMPLT_F = 46,
 	OP_CMPLE_F = 47,
 	OP_CMPEQ_F = 48,
-	OP_CMPNE_F = 49	
+	OP_CMPNE_F = 49,
+	OP_SYSCALL = 63
 };
 typedef enum _ArithmeticOp ArithmeticOp;
 
@@ -120,9 +125,15 @@ enum _ControlRegister {
 	CR_FAULT_HANDLER = 1,
 	CR_FAULT_PC = 2,
 	CR_FAULT_REASON = 3,
-	CR_INTERRUPT_ENABLE = 4,
+	CR_FLAGS = 4,
 	CR_FAULT_ADDRESS = 5,
-	CR_CYCLE_COUNT = 6
+	CR_CYCLE_COUNT = 6,
+	CR_TLB_MISS_HANDLER = 7,
+	CR_SAVED_FLAGS = 8,
+	CR_CURRENT_ASID = 9,
+	CR_SCRATCHPAD0 = 11,
+	CR_SCRATCHPAD1 = 12,
+	CR_SUBCYCLE = 13
 };
 typedef enum _ControlRegister ControlRegister;
 
@@ -130,10 +141,28 @@ enum _FaultReason
 {
 	FR_RESET,
 	FR_ILLEGAL_INSTRUCTION,
-	FR_INVALID_ACCESS,
+	FR_DATA_ALIGNMENT,
 	FR_INTERRUPT,
-	FR_IFETCH_FAULT
+	FR_IFETCH_ALIGNNMENT,
+	FR_ITLB_MISS,
+	FR_DTLB_MISS,
+	FR_ILLEGAL_WRITE,
+	FR_DATA_SUPERVISOR,
+	FR_IFETCH_SUPERVISOR,
+	FR_PRIVILEGED_OP,
+	FR_SYSCALL
 };
 typedef enum _FaultReason FaultReason;
+
+enum _CacheControlOp
+{
+	CC_DTLB_INSERT = 0,
+	CC_DINVALIDATE = 1,
+	CC_DFLUSH = 2,
+	CC_INVALIDATE_TLB = 5,
+	CC_INVALIDATE_TLB_ALL = 6,
+	CC_ITLB_INSERT = 7
+};
+typedef enum _CacheControlOp CacheControlOp;
 
 #endif
